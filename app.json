@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "Koyoi",
+    "slug": "koyoi",
+    "version": "2.14.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0d0d0d"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.koyoi.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0d0d0d"
+      },
+      "package": "com.koyoi.app",
+      "edgeToEdgeEnabled": true,
+      "softwareKeyboardLayoutMode": "resize"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-document-picker",
+      "./plugins/withLargeHeap"
+    ],
+    "description": "AI互动小说 — 创建世界、上传小说、沉浸式角色扮演。支持 DeepSeek V4，完全本地存储。"
+  }
+}
