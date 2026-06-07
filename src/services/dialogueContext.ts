@@ -29,6 +29,11 @@ export interface DialogueContext {
     contradictions: string;
     speechStyle: string;
     speechSample: string;
+    firstAppear?: number;
+    lastAppear?: number;
+    knowledgeWarning?: string;
+    sceneReason?: string;
+    relationshipAttitudes?: string;
   }>;
   /** 当前章节的文风样本 */
   styleSamples: string[];
@@ -48,6 +53,52 @@ export interface DialogueContext {
  * 根据章节号估算当前剧情位置
  * 优先使用显式传入的章节号，否则从事件引用推断
  */
+
+/**
+ * 构建角色在当前章节的出场理由
+ * 从原著角色数据中提取：标志性场景、目标、当前状态
+ */
+function buildSceneReason(char: any, chapter: number, kb: KnowledgeBase): string {
+  const reasons: string[] = [];
+
+  const sigScenes = (char.signatureScenes || []).filter((s: any) => Math.abs(s.chapter - chapter) <= 2);
+  if (sigScenes.length > 0) reasons.push('正在经历：' + sigScenes[0].description);
+
+  const statusChanges = (char.statusChanges || []).filter((s: any) => Math.abs(s.chapter - chapter) <= 3);
+  if (statusChanges.length > 0) {
+    const sc = statusChanges[0];
+    reasons.push('状态变化：从' + sc.from + ' → ' + sc.to + '（第' + (sc.chapter+1) + '章）');
+  }
+
+  const nearbyEvents = kb.globalTimeline
+    .filter(e => Math.abs(e.chapter - chapter) <= 2 && (e.event.includes(char.name) || (e.involvedCharacters || []).includes(char.name)))
+    .slice(0, 3);
+  if (nearbyEvents.length > 0) reasons.push('涉及：' + nearbyEvents.map(e => '第' + (e.chapter+1) + '章 ' + e.event.slice(0, 20)).join('；'));
+
+  if (char.role) reasons.push(char.role);
+
+  return reasons.join(' | ') || '出现在当前场景中';
+}
+
+/**
+ * 构建角色对他人的关系态度
+ * 从关系数据中提取当前时间点的具体行为倾向
+ */
+function buildRelationshipAttitudes(charName: string, chapter: number, kb: KnowledgeBase): string {
+  const attitudes: string[] = [];
+  for (const r of kb.relations) {
+    if (r.from !== charName && r.to !== charName) continue;
+    const other = r.from === charName ? r.to : r.from;
+    let status = r.type;
+    for (const change of (r.changes || [])) {
+      if (change.chapter <= chapter) status = change.to || change.from || status;
+    }
+    attitudes.push(`对${other}：${status}`);
+  }
+  return attitudes.join(' | ') || '';
+}
+
+
 function estimateCurrentChapter(
   kb: KnowledgeBase,
   explicitChapter?: number,
@@ -165,6 +216,15 @@ export async function buildDialogueContext(
         speechSample: c.speechSamples.filter(s => s.chapter <= chapter).pop()?.quote || c.speechSamples.find(s =>
           s.chapter >= startCh && s.chapter <= endCh
         )?.quote || c.speechSamples[0]?.quote || '',
+        firstAppear: c.firstAppear,
+        lastAppear: c.lastAppear,
+        knowledgeWarning: chapter < (c as any).totalChapters
+          ? `（当前第${chapter+1}章，该角色不知道后续章节的事件）`
+          : '',
+        /** 该角色在当前场景的出场理由（从原著中提取） */
+        sceneReason: buildSceneReason(c, chapter, kb),
+        /** 该角色对场景中其他人的关系态度 */
+        relationshipAttitudes: buildRelationshipAttitudes(c.name, chapter, kb),
       }));
 
     // 当前时间点的关系状态
@@ -252,6 +312,9 @@ export function contextToPrompt(ctx: DialogueContext): string {
       if (traits) line += ` | ${traits}`;
       line += ` | 说话：${c.speechStyle || '未知'}`;
       if (c.speechSample) line += ` | 例：「${c.speechSample.slice(0, 40)}」`;
+      if (c.relationshipAttitudes) line += `\n    💬 ${c.relationshipAttitudes}`;
+      if (c.sceneReason) line += `\n    📍 ${c.sceneReason}`;
+      if (c.knowledgeWarning) line += `\n    ⚠ ${c.knowledgeWarning}`;
       return line;
     }).join('\n')}`);
   }

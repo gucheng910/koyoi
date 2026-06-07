@@ -3,12 +3,12 @@
   "version": "2.14.0",
   "private": false,
   "main": "index.ts",
-  "description": "AI互动小说 — 创建世界、上传小说、沉浸式角色扮演。支持 DeepSeek V4，完全本地存储。",
+  "description": "AI驱动的成人文字游戏 — 上传小说，魂穿到故事中。支持 DeepSeek V4，完全本地存储。",
   "author": "Koyoi",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/gucheng910/koyoi"
+    "url": "https://github.com/yourusername/koyoi"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^3.1.1",
@@ -45,5 +45,6 @@
     "web": "expo start --web",
     "test": "jest",
     "test:watch": "jest --watch"
-  }
+  },
+  "private": true
 }

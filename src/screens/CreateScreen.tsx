@@ -329,7 +329,7 @@ export default function CreateScreen({ isDark, onCreated }: Props) {
           </View>
           <TextInput style={[st.input, st.inputMulti]} placeholder="力量/超自然体系" placeholderTextColor="#666" value={worldSupernatural} onChangeText={setWorldSupernatural} multiline />
           <TextInput style={[st.input, st.inputMulti]} placeholder="社会结构/权力分布" placeholderTextColor="#666" value={worldSociety} onChangeText={setWorldSociety} multiline />
-          <TextInput style={[st.input, st.inputMulti]} placeholder="性别观念/权力结构" placeholderTextColor="#666" value={worldSexualNorms} onChangeText={setWorldSexualNorms} multiline />
+          <TextInput style={[st.input, st.inputMulti]} placeholder="性观念/性别关系" placeholderTextColor="#666" value={worldSexualNorms} onChangeText={setWorldSexualNorms} multiline />
         </View>
 
         <TouchableOpacity style={st.createBtn} onPress={async () => {

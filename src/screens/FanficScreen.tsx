@@ -408,13 +408,50 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
 
     // 确定入口章节和时间点前后的事件
     let entryChapterNum = 0;
+    const totalCh = worldCard.totalChapters || 100;
     const chMatch = timePoint.match(/第(\d+)章/);
-    if (chMatch) entryChapterNum = parseInt(chMatch[1]) - 1;
-    else if (timePoint.includes('高潮')) entryChapterNum = Math.floor((worldCard.totalChapters || 10) / 2);
-    else if (timePoint.includes('结局')) entryChapterNum = (worldCard.totalChapters || 10) - 2;
+    if (chMatch) {
+      entryChapterNum = parseInt(chMatch[1]) - 1;
+    } else {
+      const tp = timePoint;
+      if (tp.includes('开篇') || tp.includes('开始') || tp.includes('开头') || tp.includes('初始') || tp.includes('序章') || tp.includes('引子')) entryChapterNum = Math.floor(totalCh * 0.02);
+      else if (tp.includes('发展') || tp.includes('中期') || tp.includes('展开')) entryChapterNum = Math.floor(totalCh * 0.25);
+      else if (tp.includes('高潮') || tp.includes('关键') || tp.includes('转折') || tp.includes('决战')) entryChapterNum = Math.floor(totalCh * 0.55);
+      else if (tp.includes('结局') || tp.includes('尾声') || tp.includes('末尾') || tp.includes('最后')) entryChapterNum = Math.floor(totalCh * 0.95);
+      else if (tp.match(/\d+/)) entryChapterNum = Math.min(parseInt(tp.match(/\d+/)![0]) - 1, totalCh - 1);
+      else {
+        // 模糊时间点：在时间线事件中搜索匹配
+        let bestMatch = -1;
+        let bestScore = 0;
+        for (const e of allEvents) {
+          const desc = e.description;
+          // 逐字搜索：用户输入的关键词在事件描述中出现了几个
+          let score = 0;
+          for (let i = 0; i < tp.length - 1; i++) {
+            const bigram = tp.slice(i, i + 2);
+            if (desc.includes(bigram)) score++;
+          }
+          if (score > bestScore) { bestScore = score; bestMatch = e.chapter || 0; }
+        }
+        if (bestMatch >= 0) entryChapterNum = bestMatch;
+      }
+    }
+    entryChapterNum = Math.max(0, Math.min(entryChapterNum, totalCh - 1));
 
     // 筛选穿越相关角色：魂穿目标 + 目标的关系网 + 穿越地点附近的角色
     let relatedChars: any[] = [];
+    
+    // 匹配穿越地点到知识库中的实际地点
+    let matchedLocation = '';
+    if (entryLocation && worldCard.locations?.length > 0) {
+      const locMatch = worldCard.locations.find((l: any) =>
+        l.name?.includes(entryLocation) || entryLocation.includes(l.name?.slice(0, 2))
+      );
+      if (locMatch) {
+        matchedLocation = locMatch.name + (locMatch.description ? '：' + locMatch.description : '');
+      }
+    }
+
     if (transType === 'soul' && targetCharId) {
       const target = worldChars.find((c: any) => c.name === targetCharId || c.id === targetCharId);
       if (target) {
@@ -460,7 +497,7 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
       `穿越方式：${isSoul ? '魂穿（占据他人身体）' : '身穿（本体降临）'}`,
       isSoul ? `占据角色：${targetName}${playerDesc ? '，外貌：' + playerDesc : ''}` : `玩家外貌：${playerDesc || '未设定'}`,
       `穿越时间点：${timePoint || '故事开始'}（原著第${entryChapterNum+1}章附近）`,
-      `穿越地点：${entryLocation || '未指定'}`,
+      `穿越地点：${entryLocation || '未指定'}${matchedLocation ? '（原著中：' + matchedLocation + '）' : ''}`,
       `原著剧情了解程度：${plotKnowledge ? '玩家对原剧情了如指掌' : '玩家对原剧情一无所知'}`,
       `原主意识状态：${isSoul ? (soulStatus === 'gone' ? '已完全消散' : soulStatus === 'dormant' ? '沉睡在最深处' : '与原主意识共存') : '无（身穿）'}`,
       ``,
@@ -971,12 +1008,28 @@ ${isSoul ? '- 魂穿：写出意识进入新身体的错位感。你发现自己
                 <Text style={st.label}>起始场景</Text>
                 <View style={[st.row, { marginBottom: 8 }]}>
                   {(() => {
-                    const scenes = worldCard.timeline.slice(0, 3).map((e, i) => ({
-                      label: i === 0 ? '🌅 开场' : i === 1 ? '🔥 高潮' : '🌙 结局',
-                      event: typeof e === 'string' ? e : ((e as any).event || (e as any).description || '')
-                    }));
+                    const total = worldCard.totalChapters || worldCard.timeline.length || 100;
+                    // 按章节位置找真正的开场/高潮/结局事件
+                    const findEvent = (ratio: number) => {
+                      const targetCh = Math.floor(total * ratio);
+                      const events = worldCard.timeline as any[];
+                      let best = events[0];
+                      let bestDist = Infinity;
+                      for (const e of events) {
+                        const ch = (e as any).chapter || 0;
+                        const dist = Math.abs(ch - targetCh);
+                        if (dist < bestDist) { bestDist = dist; best = e; }
+                      }
+                      return typeof best === 'string' ? best : ((best as any)?.event || (best as any)?.description || '');
+                    };
+                    const scenes = [
+                      { label: '🌅 开篇', event: findEvent(0.02), ratio: 0.02 },
+                      { label: '📈 发展', event: findEvent(0.25), ratio: 0.25 },
+                      { label: '🔥 高潮', event: findEvent(0.55), ratio: 0.55 },
+                      { label: '🌙 结局', event: findEvent(0.95), ratio: 0.95 },
+                    ];
                     return scenes.map((s, i) => (
-                      <TouchableOpacity key={i} style={[st.btn, timePoint === s.event && st.btnActive]} onPress={() => setTimePoint(s.event)}>
+                      <TouchableOpacity key={i} style={[st.btn, timePoint === s.event && st.btnActive]} onPress={() => setTimePoint(s.label)}>
                         <Text style={[st.btnText, timePoint === s.event && st.btnTextActive]} numberOfLines={1}>{s.label}</Text>
                       </TouchableOpacity>
                     ));

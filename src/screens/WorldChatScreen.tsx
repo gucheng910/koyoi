@@ -46,7 +46,8 @@ const T = (dark: boolean) => StyleSheet.create({
 
 function parseSpeakers(text: string): { speaker: string; content: string }[] {
   const segments: { speaker: string; content: string }[] = [];
-  const re = /【(.+?)】\s*/g;
+  // 支持全角【】和半角[]两种标记
+  const re = /[【\[](.+?)[】\]]\s*/g;
   let lastIdx = 0; let match;
   while ((match = re.exec(text)) !== null) {
     if (lastIdx > 0 || match.index > 0) {
@@ -256,19 +257,8 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
           isFanfic ? VOCAB_LOCK : '',
           ...WORLD_RULES,
           '\n场景：' + (session.currentScene || '未知地点'),
-          '\n角色：',
-          ...session.selectedCharacters.map(c => {
-            const deep = (c.personality as any)?._deepProfile || '';
-            const dialogue = (c.exampleDialogues || []).slice(0, 2).map((d: any) => d.character).join(' / ');
-            let line = '- ' + c.name + '：' + c.personality.traits.join('、') + '，' + c.relationship.status;
-            const att = attitudes.current[c.name];
-            if (att && att.affection !== undefined) { const label = att.affection > 60 ? '亲近' : att.affection > 30 ? '友好' : att.affection > 0 ? '平淡' : att.affection < -30 ? '厌恶' : att.affection < 0 ? '冷淡' : '中性'; line += ' | 好感：' + att.affection.toFixed(1) + '（' + label + '）'; }
-            if (deep) line += ' | ' + deep;
-            if ((c as any).arc?.description) { const arc = (c as any).arc; const ch = session.currentChapter || 0; const pastChs = arc.keyChapters?.filter((k: number) => k <= ch) || []; line += ' | 弧线：' + arc.description + (pastChs.length > 0 ? '（已走过' + pastChs.map((k:number)=>'第'+(k+1)+'章').join('→') + '）' : ''); }
-            if (c.personality.speakingStyle) line += ' | 说话：' + c.personality.speakingStyle;
-            if (dialogue) line += ' | 台词：「' + dialogue + '」';
-            return line;
-          }),
+      
+          ...charLines,
           ...(session.npcs || []).filter(n => !session.selectedCharacters.some(c => c.name === n.name)).map(n => {
             const wc = ((session.world as any)?.characters || []).find((wc: any) => wc.name === n.name);
             const orig = wc?.role || wc?.relationship?.status || '';

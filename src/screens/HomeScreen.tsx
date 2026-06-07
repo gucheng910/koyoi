@@ -64,7 +64,26 @@ export default function HomeScreen({ isDark, onEnterWorld, onNewWorld, onNewFanf
   useEffect(() => { setConfigured(!!useConfigStore.getState().getActiveConfig()?.apiKey); loadSessions(); }, []);
   const loadSessions = async () => {
     try {
-      const rawIdx = await AsyncStorage.getItem('@koyoi_world_index');
+      let rawIdx = await AsyncStorage.getItem('@koyoi_world_index');
+      // 迁移旧数据：@koyoi_world_sessions 数组 → 新的 per-key 格式
+      if (!rawIdx) {
+        const oldRaw = await AsyncStorage.getItem('@koyoi_world_sessions');
+        if (oldRaw) {
+          try {
+            const oldSessions = JSON.parse(oldRaw);
+            if (Array.isArray(oldSessions) && oldSessions.length > 0) {
+              const index: any = {};
+              for (const s of oldSessions) {
+                if (!s?.id || !s?.world) continue;
+                await AsyncStorage.setItem('@koyoi_session_' + s.id, JSON.stringify(s));
+                index[s.id] = { id: s.id, name: s.world?.name || '未知', type: s.world?.type || 'custom', charCount: s.selectedCharacters?.length || 0, msgCount: s.messages?.length || 0, lastActivity: s.createdAt || new Date().toISOString(), hasNovelId: !!s.worldNovelId, currentChapter: s.currentChapter || 0 };
+              }
+              await AsyncStorage.setItem('@koyoi_world_index', JSON.stringify(index));
+              rawIdx = JSON.stringify(index);
+            }
+          } catch {}
+        }
+      }
       if (!rawIdx) return;
       const index = JSON.parse(rawIdx);
       const ids = Object.keys(index);
