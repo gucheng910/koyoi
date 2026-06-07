@@ -151,7 +151,21 @@ export default function HomeScreen({ isDark, onEnterWorld, onNewWorld, onNewFanf
       <View style={S.header}>
         <Text style={S.title}>Koyoi</Text>
         <Text style={S.sub}>选择一个世界，开始你的故事</Text>
-        {!configured && <View style={S.warning}><Text style={S.warningText}>⚡ 请先前往设置配置 API Key</Text></View>}
+        {!configured ? (
+          sessions.length === 0 ? (
+            <View style={[S.card, { marginHorizontal: 20, marginBottom: 16, borderColor: '#5B9BD5' }]}>
+              <Text style={[S.cardName, { marginBottom: 8 }]}>欢迎使用 Koyoi</Text>
+              <Text style={{ fontSize: 12, color: isDark ? '#8A8070' : '#8A8070', lineHeight: 20 }}>
+                三步开始：
+1. 前往设置填入 DeepSeek API Key
+2. 新建世界或上传小说
+3. 选择世界，开始对话
+              </Text>
+            </View>
+          ) : (
+            <View style={S.warning}><Text style={S.warningText}>⚡ 请先前往设置配置 API Key</Text></View>
+          )
+        ) : null}
       </View>
       <View style={S.actions}>
         <TouchableOpacity style={S.btnPrimary} onPress={onNewWorld}><Text style={S.btnPrimaryText}>🌍 新建世界</Text></TouchableOpacity>

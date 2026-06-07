@@ -22,6 +22,7 @@ import { getWorldInfo as getWorldInfoFn, extractMemories as extractMemoriesFn } 
 import { enhanceWithScenario } from '../services/scenarioInjector';
 import { generateBackgroundInteraction, applyBackgroundInteraction } from '../services/backgroundInteraction';
 import { WORLD_RULES, NARRATOR_BASE, NARRATOR_FANFIC_APPEND, VOCAB_LOCK, POST_HISTORY_BASE } from '../prompts/worldRules';
+import { processInput, maybeGenerateSummary, buildContext, runCharacterSimulation, assemblePrompt, callAI, postProcessResponse, runPostSendHooks } from '../services/sendPipeline';
 
 interface Props { session: WorldSession; onBack: () => void; isDark: boolean; }
 
@@ -113,6 +114,21 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
 
   const displayMsgs = [...messages, ...(isGenerating && streamingText ? [{ role: 'assistant' as const, content: streamingText, timestamp: '', isStreaming: true } as any] : [])];
 
+  const handleRegenerate = () => {
+    if (isGenerating) return;
+    const trimTo = messages.map((m, i) => m.role === 'assistant' ? i : -1).filter(i => i >= 0);
+    // 找到倒数第二条 assistant 消息的位置（或 0，如果只有一条）
+    const cutIdx = trimTo.length >= 2 ? trimTo[trimTo.length - 2] + 1 : (trimTo.length === 1 ? trimTo[0] : messages.length);
+    showAlert('重新生成', '将删除上一条 AI 回复，你可以修改后重新发送。', [
+      { text: '取消', style: 'cancel' },
+      { text: '重新生成', onPress: () => {
+        const trimmed = messages.slice(0, cutIdx);
+        setMessages(trimmed);
+        setToast({msg: '已移除上一条回复，修改消息后重新发送', type: 'success'});
+      } },
+    ]);
+  };
+
   const SESSION_KEY = '@koyoi_session_' + session.id;
   const INDEX_KEY = '@koyoi_world_index';
 
@@ -150,235 +166,56 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
     if (segments.length === 0 || isGenerating) return;
     const cfg = useConfigStore.getState().getActiveConfig();
     if (!cfg?.apiKey) { setError('请先配置API Key'); return; }
+
+    // 阶段 1: 输入处理
     setError(null); setIsGenerating(true); setStreamingText('');
-    const finalText = segments.map((s: any) => '[' + (s.tag === 'speech' ? '说' : '行动') + '] ' + s.text).join('\n');
+    const { finalText, userMsg, msgsWithUser } = processInput(segments, messages);
     setSegments([]);
-    const userMsg: ChatMessage = { role: 'user', content: finalText, timestamp: new Date().toISOString() };
-    const msgsWithUser = [...messages, userMsg];
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setMessages(msgsWithUser);
     smartScroll();
+
     try {
-      const worldInfo = getWorldInfoFn(session, finalText, messages);
-      if (messages.length > 30 && !summaryRef.current && turnCount.current % 10 === 0) {
-        const oldMsgs = messages.slice(0, messages.length - 30);
-        if (oldMsgs.length > 10) {
-          const sp = [{ role: 'system' as const, content: '将对话压缩为摘要。事件/关系/情感各30字内。' }, { role: 'user' as const, content: oldMsgs.map((m: any) => (m.role==='user'?'玩家':'')+':'+m.content.slice(0,150)).join('\n').slice(0, 8000) }];
-          chatCompletionSync({ ...cfg, thinkingMode: 'disabled' }, sp, { maxTokens: 300, temperature: 0.2 }).then(raw => { if (raw && raw.length > 20) summaryRef.current = '[对话摘要]\n' + raw.slice(0, 400); }).catch(() => {});
-        }
-      }
-      let chapterCtx: any = null;
-      try { if (session.worldNovelId) chapterCtx = await buildDialogueContext(session.worldNovelId, session.currentChapter || 0, (session.recentWorldEvents || []).slice(-5), finalText); } catch {}
+      // 阶段 2: 摘要生成（非阻塞）
+      maybeGenerateSummary(messages, turnCount.current, summaryRef, cfg);
+
+      // 阶段 3: 上下文构建
+      const { chapterCtx, isFanfic, worldInfo } = await buildContext(session, finalText, messages, turnCount.current);
+
+      // 阶段 4: 角色推演
       const hasRounds = turnCount.current >= 2;
-      const isFanfic = !!(session.worldNovelId || (session.world?.writingStyle && session.world?.characters?.length));
-      let charActions: CharacterAction[] = [];
-      if (hasRounds) {
-        const chars = [
-          ...session.selectedCharacters.filter(c => activeChars.current.includes(c.name)).map(c => ({ name: c.name, personality: c.personality.traits.join('/'), deepPersonality: '', role: c.relationship.status, status: c.currentContext.location, goal: '', relationship: '亲密' + c.relationship.intimacy + '/100', interactionState: 'active' as const })),
-          ...(session.npcs || []).map(n => ({ name: n.name, personality: n.personality, deepPersonality: '', role: n.role, status: n.currentStatus, goal: n.goal || '', relationship: '路人', interactionState: activeChars.current.includes(n.name) ? 'active' as const : 'inactive' as const })),
-        // 同人世界：未出场的原著角色也推演（知道他们在想什么）
-        ...(isFanfic && turnCount.current % 3 === 0 ? (session.world?.characters || []).filter((c: Character) => { const n = c.name || ''; return !session.selectedCharacters.some(sc => sc.name === n) && !(session.npcs||[]).some(np => np.name === n); }).slice(0, 5).map((c: Character) => ({ name: c.name || '', personality: (c.personality?.traits || ['未知']).join('/'), deepPersonality: (c.personality as any)?._deepProfile || '', role: c.relationship?.status || '', status: '故事某处', goal: '', relationship: '原著角色', interactionState: 'inactive' as const })) : []),
-        ];
-        if (chars.length > 0) {
-          const simKbContext: Record<string, string> = {};
-          if (chapterCtx?.activeCharacters) {
-            for (const c of chars) {
-              const kb = chapterCtx.activeCharacters.find((ac: any) => ac.name === c.name);
-              if (kb) {
-                const parts: string[] = [];
-                if (kb.traits?.length) parts.push('性格：' + kb.traits.join('、'));
-                if (kb.deepTraits?.length) parts.push('真实性格：' + kb.deepTraits.join('、'));
-                if (kb.defenseMechanism) parts.push('防御机制：' + kb.defenseMechanism);
-                if (kb.role) parts.push('身份：' + kb.role);
-                if (kb.speechStyle) parts.push('说话方式：' + kb.speechStyle);
-                if (kb.speechSample) parts.push('台词示例：' + kb.speechSample);
-                simKbContext[c.name] = parts.join('\n');
-              }
-            }
-          }
-          try {
-            const result = await simulateCharacters(cfg, chars, session.currentScene, (session.recentWorldEvents || []).slice(-2).join('；'), activeChars.current.join('、'), lastSimResults.current, simKbContext);
-            charActions = result.actions;
-            const record: Record<string,{intent:string;mood:string}> = {};
-            for (const a of charActions) {
-              record[a.name] = {intent:a.intent, mood:a.mood};
-              if (a.affectionDelta && Math.abs(a.affectionDelta) > 0.001) {
-                if (!attitudes.current[a.name]) attitudes.current[a.name] = { trust: 50, affection: 0, fear: 20, lastUpdate: '' };
-                let delta = a.affectionDelta; const aff = attitudes.current[a.name].affection || 0;
-                if (aff > 80) delta *= 0.25; else if (aff > 60) delta *= 0.5; else if (aff < -50) delta *= 1.5;
-                attitudes.current[a.name].affection = Math.max(-100, Math.min(100, aff + delta));
-              }
-            }
-            lastSimResults.current = record;
-            for (const ch of result.interactionChanges) {
-              if (ch.action === 'pull_in' && ch.character_name && !activeChars.current.includes(ch.character_name)) {
-                activeChars.current.push(ch.character_name);
-                const existingNpc = (session.npcs || []).find(n => n.name === ch.character_name);
-                const inSelected = session.selectedCharacters.some(c => c.name === ch.character_name);
-                if (!existingNpc && !inSelected) {
-                  const worldChars = (session.world as any)?.characters || [];
-                  const wc = worldChars.find((wc: any) => wc.name === ch.character_name);
-                  const newNpc = wc ? { name: wc.name, role: wc.relationship?.status || '原著角色', personality: (wc.personality?.traits || ['未知']).join('/'), currentStatus: '刚刚出现', goal: '' } : { name: ch.character_name, role: '原著角色', personality: '未知', currentStatus: '刚刚出现', goal: '' };
-                  setSession(prev => ({ ...prev, npcs: [...(prev.npcs || []), newNpc] }));
-                }
-              } else if (ch.action === 'push_out' && ch.character_name) {
-                activeChars.current = activeChars.current.filter(n => n !== ch.character_name);
-              }
-            }
-          } catch {}
-        }
-      }
-      const fanficAppend = isFanfic ? NARRATOR_FANFIC_APPEND : '';
-      const chapterPrompt = (isFanfic && chapterCtx) ? contextToPrompt(chapterCtx) : '';
-      const bedrockMems = (session as any).bedrockMemories || [];
-      const bedrockText = bedrockMems.length > 0 ? '\n核心记忆（永不遗忘）：\n' + bedrockMems.map((m: any) => '  - ' + (m.content || m)).join('\n') : '';
-      const styleFeat = (session.world as any)?.styleFeatures ? '\n风格特征：\n' + (session.world as any).styleFeatures : '';
-      // 情景注入（DeepRolePlay 式记忆闪回）
-      let scenarioBlock = '';
-      // 只在当前消息提到记忆中实体时才触发情景注入（免浪费 token）
-      const lastUserText = msgsWithUser.filter(m => m.role === 'user').pop()?.content || '';
-      const hasMemoryTrigger = (session.memories || []).some(m => lastUserText.includes(m.split(/[:：]/)[0]?.slice(0, 3) || ''));
-      if (hasMemoryTrigger || (session.memories || []).length <= 5) {
-        try {
-          const sc = await enhanceWithScenario(session, messages.slice(-6), cfg);
-          if (sc.scenarioBlock) scenarioBlock = '\n' + sc.scenarioBlock;
-        } catch {}
-      }
-      const prompt = [
-        { role: 'system' as const, content: [
-          '你是' + (session.world?.name || '未知世界') + '的叙事引擎。' + NARRATOR_BASE + fanficAppend,
-          '【玩家身份】' + (session.selectedCharacters.length > 0 ? session.selectedCharacters[0].name : '玩家') + '是你正在互动的玩家角色。[说]=玩家角色在说话，[行动]=玩家角色的行为。你扮演除玩家以外的所有角色和旁白。',
-          '世界观：' + (session.world?.type || '') + ' | ' + (session.world?.rules?.supernatural || ''),
-          chapterPrompt,
-          summaryRef.current || '',
-          bedrockText,
-          scenarioBlock,
-          styleFeat,
-          isFanfic ? VOCAB_LOCK : '',
-          ...WORLD_RULES,
-          '\n场景：' + (session.currentScene || '未知地点'),
-      
-          ...charLines,
-          ...(session.npcs || []).filter(n => !session.selectedCharacters.some(c => c.name === n.name)).map(n => {
-            const wc = ((session.world as any)?.characters || []).find((wc: any) => wc.name === n.name);
-            const orig = wc?.role || wc?.relationship?.status || '';
-            const deep = (wc?.personality as any)?._deepProfile || '';
-            let line = '- ' + n.name + '：' + n.role + (orig ? '（原著：' + orig + '）' : '') + '，' + n.personality;
-            if (deep) line += ' | ' + deep;
-            return line;
-          }),
-          charActions.length > 0 ? '\n角色推演：\n' + charActions.map(a => {
-            let s = '  ' + a.name + '：' + a.intent + '（' + a.mood + '）';
-            if (a.innerThought) s += '\n    内心：' + a.innerThought;
-            if (a.bodyLanguage) s += '\n    身体：' + a.bodyLanguage;
-            if (a.subtext) s += '\n    潜台词：' + a.subtext;
-            s += '\n    方向：' + (a.emotionalDirection || 'holding') + ' | 指向：' + (a.toward === 'player' ? '玩家' : a.toward || 'none') + (a.wantsInteraction ? ' | 想互动' : '');
-            if (a.triggerContext) s += '\n    触发：' + a.triggerContext;
-            return s;
-          }).join('\n') : '',
-          session.worldBible ? '\n世界圣经：' + session.worldBible : '',
-          (session.world as any)?.styleSamples?.length > 0 ? '\n风格参考：' + (session.world as any).styleSamples.slice(0, 2).map((s: string) => '「' + s + '」').join('\n') : '',
-          '\n【角色引入】需要引入原著新角色时，在回复末尾添加 ___META___ {"newCharacter":"角色名"}',
-          worldInfo || '',
-          POST_HISTORY_BASE,
-        ].join('\n') },
-        ...msgsWithUser.slice(1).map(m => ({ role: m.role as 'user'|'assistant', content: m.content })),
-      ];
-      const raw = await new Promise<string>((resolve, reject) => {
-        if (cfg.streamOutput) {
-          let full = '';
-          let lastUpdate = 0;
-          chatCompletion({
-            config: { ...cfg, thinkingMode: 'disabled' },
-            messages: prompt,
-            onToken: (token) => {
-              full += token;
-              const now = Date.now();
-              if (now - lastUpdate > 50) { // 每50ms最多更新一次UI，避免过度渲染
-                setStreamingText(full);
-                lastUpdate = now;
-              }
-            },
-            onComplete: (text) => { setStreamingText(''); resolve(text || full); },
-            onError: reject,
-          });
-        } else {
-          chatCompletionSync({ ...cfg, thinkingMode: 'disabled' }, prompt, { temperature: 0.8 }).then(resolve).catch(reject);
-        }
-      });
+      const charActions = hasRounds
+        ? await runCharacterSimulation(session, cfg, chapterCtx, isFanfic, turnCount.current, activeChars, lastSimResults, attitudes)
+        : [];
+
+      // 阶段 5: 提示词组装
+      const { prompt } = await assemblePrompt(session, msgsWithUser, messages, charActions, chapterCtx, isFanfic, cfg, summaryRef, attitudes);
+
+      // 阶段 6: API 调用
+      const raw = await callAI(cfg, prompt, setStreamingText);
+
       if (raw) {
-        let displayText = raw;
-        // 同人模式：用原文 + 风格特征做 polish，对齐文风
-        if (session.worldNovelId && cfg.autoPolish !== false) {
-          try {
-            const styleFeatures = session.world?.writingStyle || '';
-            const chapterSample = chapterCtx?.chapterText || '';
-            if (styleFeatures || chapterSample) {
-              displayText = await polishText(cfg, displayText, { styleFeatures, chapterSample });
-            }
-          } catch { /* polish 失败不影响主流程 */ }
+        // 阶段 7: 响应后处理
+        const { displayText, newNpcs } = await postProcessResponse(raw, session, cfg, chapterCtx, activeChars);
+        if (newNpcs) {
+          for (const npc of newNpcs) {
+            setSession(prev => ({
+              ...prev,
+              npcs: [...(prev.npcs || []), npc],
+              recentWorldEvents: [...(prev.recentWorldEvents || []).slice(-19), npc.name + '进入了场景'],
+            }));
+            if (!activeChars.current.includes(npc.name)) activeChars.current.push(npc.name);
+          }
         }
-        const metaMatch = raw.match(/___META___\s*(\{[\s\S]*\})/);
-        if (metaMatch) {
-          try {
-            const meta = JSON.parse(metaMatch[1]);
-            displayText = raw.replace(/___META___[\s\S]*$/, '').trim();
-            if (meta.newCharacter && typeof meta.newCharacter === 'string') {
-              const name = meta.newCharacter;
-              const inScene = session.selectedCharacters.some(c => c.name === name) || (session.npcs||[]).some(n => n.name === name);
-              if (!inScene) {
-                const worldChars = (session.world as any)?.characters || [];
-                const wc = worldChars.find((wc: any) => wc.name === name);
-                const newNpc = wc ? { name: wc.name, role: wc.relationship?.status || '原著角色', personality: (wc.personality?.traits || ['未知']).join('/'), currentStatus: '刚刚进入场景', goal: '' } : { name, role: '原著角色', personality: '未知', currentStatus: '刚刚进入场景', goal: '' };
-                setSession(prev => ({ ...prev, npcs: [...(prev.npcs || []), newNpc], recentWorldEvents: [...(prev.recentWorldEvents || []).slice(-19), name + '进入了场景'] }));
-                if (!activeChars.current.includes(name)) activeChars.current.push(name);
-              }
-            }
-          } catch {}
-        }
+
         const msg: ChatMessage = { role: 'assistant', content: displayText || raw, timestamp: new Date().toISOString() };
         const updated = [...msgsWithUser, msg];
         LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
         setMessages(updated);
-        turnCount.current++; smartScroll();
-        if (turnCount.current % 5 === 0) saveSession(updated);
-        // 章节追踪：每3轮让AI判断剧情推进到原著的哪一章
-        if (turnCount.current % 3 === 0 && session.worldNovelId) {
-          const tcfg = useConfigStore.getState().getActiveConfig();
-          if (tcfg) {
-            const recentTexts = updated.slice(-6).filter((m: any) => !m.isStreaming).map((m: any) => m.content).join('\n');
-            estimateChapterPosition(tcfg, session.worldNovelId, session.currentChapter || 0, [recentTexts]).then(pos => {
-              const newCh = shouldAdvanceChapter(session.currentChapter || 0, pos);
-              if (newCh !== null) {
-                console.log('[KOYOI] chapter advanced:', (session.currentChapter||0)+1, '→', newCh+1, pos?.reason);
-                setSession(prev => ({ ...prev, currentChapter: newCh }));
-              }
-            }).catch(() => {});
-          }
-        }
-        if (turnCount.current % 10 === 0) {
-          const mcfg = useConfigStore.getState().getActiveConfig();
-          if (mcfg) extractMemoriesFn(mcfg.apiKey, mcfg.baseUrl, mcfg.model, updated, lastSimResults.current).then(mems => {
-            if (mems.length) setSession(prev => ({ ...prev, memories: [...(prev.memories || []), ...mems].slice(-20) }));
-          });
-        }
-        // 角色自主互动（每 5 轮触发一次，参考 OpenCharacterBook A2A）
-        if (turnCount.current % 5 === 0 && session.selectedCharacters.length >= 2) {
-          const bcfg = useConfigStore.getState().getActiveConfig();
-          if (bcfg) {
-            const activeList = session.selectedCharacters.map(c => ({
-              name: c.name,
-              personality: c.personality.traits.join('/'),
-              status: c.currentContext?.mood || '平静',
-              relationship: c.relationship?.status || '陌生人',
-            }));
-            generateBackgroundInteraction(bcfg, activeList, session.currentScene || '未知场景').then(interaction => {
-              if (interaction) {
-                setSession(prev => applyBackgroundInteraction(prev, interaction));
-              }
-            }).catch(() => {});
-          }
-        }
+        smartScroll();
+
+        // 阶段 8: 后处理钩子
+        runPostSendHooks({ session, updated, turnCount, saveSession, setSession, activeChars, lastSimResults });
       }
     } catch (e: any) {
       const msg = e.message || String(e);
@@ -388,8 +225,9 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
       else if (msg.includes('500') || msg.includes('502')) setError('服务器繁忙，请稍后重试。');
       else if (msg.includes('超时') || msg.includes('timeout')) setError('请求超时，请检查网络连接。');
       else setError(msg);
+    } finally {
+      setIsGenerating(false);
     }
-    finally { setIsGenerating(false); }
   }, [isGenerating, session, messages, segments]);
 
   const renderMsg = ({ item }: { item: ChatMessage }) => {
@@ -406,10 +244,20 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
       })}</View>;
     }
     const speakers = parseSpeakers(item.content);
-    return <View>{speakers.map((seg, i) => {
+    const isLastAssistant = item.role === 'assistant' && messages.length > 0 && messages[messages.length - 1] === item && !isGenerating;
+    const inner = <View>{speakers.map((seg, i) => {
       if (seg.speaker && seg.speaker !== '旁白') return <View key={i} style={st.msgBubble}><Text style={st.speakerName}>{seg.speaker}</Text><Text style={st.msgText}>{seg.content}</Text></View>;
       return <Text key={i} style={[st.msgText, { paddingHorizontal: 16, paddingVertical: 4, color: isDark ? '#8A8070' : '#8A8068', fontStyle: 'italic', fontSize: 14, lineHeight: 22, borderLeftWidth: 2, borderLeftColor: isDark ? '#2C2A22' : '#E8E4DD', marginLeft: 4 }]}>{seg.content}</Text>;
     })}</View>;
+    if (isLastAssistant) {
+      return (
+        <TouchableOpacity activeOpacity={0.9} onLongPress={handleRegenerate}>
+          {inner}
+          <Text style={{ fontSize: 9, color: isDark ? '#5A5450' : '#B8B0A4', paddingLeft: 16, marginTop: -4, marginBottom: 8 }}>长按重新生成</Text>
+        </TouchableOpacity>
+      );
+    }
+    return inner;
   };
 
   if (showOpening) return (

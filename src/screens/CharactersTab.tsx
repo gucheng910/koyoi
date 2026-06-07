@@ -1,8 +1,8 @@
 // ============================================================
 //  角色库 v2 — iOS 风格列表
 // ============================================================
-import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, FlatList, StyleSheet } from 'react-native';
+import React, { useEffect, useState, useMemo } from 'react';
+import { View, Text, TouchableOpacity, FlatList, StyleSheet, TextInput } from 'react-native';
 import { showAlert } from '../components/AnimatedAlert';
 import { useCharacterStore } from '../store/characterStore';
 import { getPresetCharacters, getPresetWorld } from '../prompts/characters/presets';
@@ -18,15 +18,35 @@ export default function CharactersTab({ isDark, onSelectChar }: Props) {
   const c = colors(isDark);
   const customChars = useCharacterStore(s => s.customCharacters);
   const [chars, setChars] = useState<Character[]>([]);
+  const [search, setSearch] = useState('');
 
   useEffect(() => { setChars([...getPresetCharacters(), ...customChars]); }, [customChars]);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return chars;
+    const q = search.toLowerCase();
+    return chars.filter(ch => {
+      const world = getPresetWorld(ch.worldId);
+      return ch.name.toLowerCase().includes(q)
+        || (world?.name || '').toLowerCase().includes(q)
+        || ch.personality.traits.some(t => t.includes(q));
+    });
+  }, [chars, search]);
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <Text style={{ fontSize: 32, fontWeight: '800', color: c.text, paddingHorizontal: 20, paddingTop: 60, paddingBottom: 8, letterSpacing: 0.5 }}>角色库</Text>
-      <Text style={{ fontSize: 13, color: c.muted, paddingHorizontal: 20, paddingBottom: 20 }}>共 {chars.length} 个角色</Text>
+      <TextInput
+        style={{ marginHorizontal: 20, marginBottom: 12, backgroundColor: c.card, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, color: c.text, fontSize: 14, borderWidth: 1, borderColor: isDark ? '#2C2A22' : '#E8E4DD' }}
+        placeholder="搜索角色名、世界观、性格..."
+        placeholderTextColor={isDark ? '#555' : '#bbb'}
+        value={search}
+        onChangeText={setSearch}
+        autoCapitalize="none"
+      />
+      <Text style={{ fontSize: 13, color: c.muted, paddingHorizontal: 20, paddingBottom: 12 }}>{search ? '找到 ' + filtered.length + ' 个' : '共 ' + chars.length + ' 个角色'}</Text>
       <FlatList
-        data={chars}
+        data={filtered}
         keyExtractor={item => item.id}
         contentContainerStyle={{ paddingHorizontal: 16 }}
         renderItem={({ item, index }) => {

@@ -104,6 +104,7 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
   const [hasPartial, setHasPartial] = useState(false);
   const [partialInfo, setPartialInfo] = useState('');
   const analysisAbortRef = useRef<AbortController | null>(null);
+  const [parseProgress, setParseProgress] = useState({ current: 0, total: 0, elapsed: 0 });
 
   // 卸载时取消进行中的分析
   useEffect(() => {
@@ -325,7 +326,8 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
           : Math.floor(remaining / 60) + '分' + Math.round(remaining % 60) + '秒';
         const elapsedMin = Math.floor((Date.now() - analyzeStart) / 60000);
         const chapterRange = chunk.chapterStart === chunk.chapterEnd ? '第' + (chunk.chapterStart+1) + '章' : '第' + (chunk.chapterStart+1) + '~' + (chunk.chapterEnd+1) + '章';
-        setParsingStatus('AI 分析中 ' + cur + '/' + total + ' 块\n' + chapterRange + '（' + (chunk.charCount / 1000).toFixed(0) + 'k字）\n已用 ' + elapsedMin + ' 分钟，预计还需 ' + eta + '\n⚠ 不要退出');
+        setParseProgress({ current: cur, total, elapsed: elapsedMin });
+        setParsingStatus(chapterRange + '（' + (chunk.charCount / 1000).toFixed(0) + 'k字）\n已用 ' + elapsedMin + ' 分钟，预计还需 ' + eta);
       }, signal);
       if (results.length === 0) throw new Error('全部分析失败');
       console.log('[KOYOI] analyzeAllChunks done, results:', results.length);
@@ -784,9 +786,16 @@ ${isSoul ? '- 魂穿：写出意识进入新身体的错位感。你发现自己
             <Text style={st.fileName}>{fileName}</Text>
             <View style={st.parsingBox}>
               {parseEstimate !== '' && <Text style={{ fontSize: 12, color: '#ff9800', textAlign: 'center', marginBottom: 16, lineHeight: 18 }}>{parseEstimate}</Text>}
+              {parseProgress.total > 0 && (
+                <View style={{ marginBottom: 16, width: '100%' }}>
+                  <View style={{ height: 4, backgroundColor: isDark ? '#1A1814' : '#E8E4DD', borderRadius: 2, overflow: 'hidden' }}>
+                    <View style={{ height: 4, width: (parseProgress.current / parseProgress.total * 100) + '%', backgroundColor: '#5B9BD5', borderRadius: 2 }} />
+                  </View>
+                  <Text style={{ fontSize: 11, color: '#8A8070', textAlign: 'center', marginTop: 6 }}>{parseProgress.current}/{parseProgress.total} 块 · 已用 {parseProgress.elapsed} 分钟</Text>
+                </View>
+              )}
               <ActivityIndicator size="large" color="#5B9BD5" />
               <Text style={st.parsingText}>{parsingStatus}</Text>
-              {parseEstimate !== '' && <Text style={{ fontSize: 12, color: '#ff9800', textAlign: 'center', marginTop: 8 }}>{parseEstimate}</Text>}
             </View>
           </>
         )}
