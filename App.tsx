@@ -93,12 +93,21 @@ function AppContent() {
   // ===== 世界持久化辅助 =====
   const saveWorldSession = async (session: WorldSession) => {
     try {
-      const raw = await AsyncStorage.getItem(WORLDS_KEY);
-      const sessions: WorldSession[] = raw ? JSON.parse(raw) : [];
-      const idx = sessions.findIndex(s => s.id === session.id);
-      if (idx >= 0) sessions[idx] = session;
-      else sessions.push(session);
-      await AsyncStorage.setItem(WORLDS_KEY, JSON.stringify(sessions));
+      // 新格式：独立 key + 索引
+      await AsyncStorage.setItem('@koyoi_session_' + session.id, JSON.stringify(session));
+      const rawIdx = await AsyncStorage.getItem('@koyoi_world_index');
+      const index = rawIdx ? JSON.parse(rawIdx) : {};
+      index[session.id] = {
+        id: session.id,
+        name: session.world?.name || '未知',
+        type: session.world?.type || 'custom',
+        charCount: session.selectedCharacters?.length || 0,
+        msgCount: session.messages?.length || 0,
+        lastActivity: new Date().toISOString(),
+        hasNovelId: !!session.worldNovelId,
+        currentChapter: session.currentChapter || 0,
+      };
+      await AsyncStorage.setItem('@koyoi_world_index', JSON.stringify(index));
     } catch {}
   };
 

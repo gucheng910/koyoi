@@ -304,19 +304,18 @@ export function contextToPrompt(ctx: DialogueContext): string {
   }
 
   if (ctx.activeCharacters.length > 0) {
-    // 精简版：主叙事 AI 只需要知道角色在场、怎么说话、表面性格
-    // 深层数据留给角色推演 AI
-    parts.push(`\n在场角色：\n${ctx.activeCharacters.map(c => {
-      const traits = c.traits.slice(0, 4).join('、');
-      let line = `  ${c.name}（${c.role}）`;
-      if (traits) line += ` | ${traits}`;
-      line += ` | 说话：${c.speechStyle || '未知'}`;
-      if (c.speechSample) line += ` | 例：「${c.speechSample.slice(0, 40)}」`;
-      if (c.relationshipAttitudes) line += `\n    💬 ${c.relationshipAttitudes}`;
-      if (c.sceneReason) line += `\n    📍 ${c.sceneReason}`;
-      if (c.knowledgeWarning) line += `\n    ⚠ ${c.knowledgeWarning}`;
-      return line;
-    }).join('\n')}`);
+    // 角色 DNA 卡片：只保留最核心的不可变特征
+    parts.push(`\n【角色 DNA——以下特征不可违背】\n${ctx.activeCharacters.map(c => {
+      const traits = c.traits.slice(0, 3).join('/');
+      let card = `  ▸ ${c.name}（${c.role}）`;
+      card += ` | 性格：${traits || '未知'}`;
+      if (c.speechStyle) card += `\n    说话方式：${c.speechStyle}`;
+      if (c.speechSample) card += `\n    ⚠ 必须这样说话（偏离即 OOC）：「${c.speechSample.slice(0, 60)}」`;
+      if (c.relationshipAttitudes) card += `\n    关系态度：${c.relationshipAttitudes}`;
+      if (c.sceneReason) card += `\n    出场理由：${c.sceneReason}`;
+      if (c.knowledgeWarning) card += `\n    ⚠ ${c.knowledgeWarning}`;
+      return card;
+    }).join('\n\n')}`);
   }
 
   if (ctx.activeRelations.length > 0) {

@@ -114,6 +114,20 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
 
   const displayMsgs = [...messages, ...(isGenerating && streamingText ? [{ role: 'assistant' as const, content: streamingText, timestamp: '', isStreaming: true } as any] : [])];
 
+  const recordFeedback = (rating: 1 | 0, msg: ChatMessage, userMsg: ChatMessage | undefined, s: WorldSession) => {
+    const { recordFeedback: rf } = require('../services/feedbackStore');
+    rf({
+      worldId: s.id, worldName: s.world?.name || '',
+      turnNumber: turnCount.current,
+      userMessage: userMsg?.content?.slice(0, 200) || '',
+      aiResponsePreview: msg.content?.slice(0, 300) || '',
+      rating, scene: s.currentScene || '',
+      activeCharacters: s.selectedCharacters.map(c => c.name),
+      isFanfic: !!s.worldNovelId,
+      currentChapter: s.currentChapter,
+    });
+  };
+
   const handleRegenerate = () => {
     if (isGenerating) return;
     const trimTo = messages.map((m, i) => m.role === 'assistant' ? i : -1).filter(i => i >= 0);
@@ -131,36 +145,49 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
 
   const SESSION_KEY = '@koyoi_session_' + session.id;
   const INDEX_KEY = '@koyoi_world_index';
+  const messagesRef = useRef(messages);
+  const sessionRef = useRef(session);
+  messagesRef.current = messages;
+  sessionRef.current = session;
 
-  const saveSession = async (msgs?: ChatMessage[]) => {
+  // 索引写入锁：防止并发写覆盖
+  const indexLock = useRef(false);
+
+  const saveSession = useCallback(async (msgs?: ChatMessage[]) => {
+    const latestMessages = msgs ?? messagesRef.current;
+    const latestSession = sessionRef.current;
     try {
-      const current = JSON.stringify({
-        ...session,
-        messages: msgs ?? messages,
-        recentWorldEvents: session.recentWorldEvents || [],
-        worldLog: session.worldLog || [],
-        memories: session.memories || [],
-        currentChapter: session.currentChapter || 0,
-      });
-      // 独立写：每个世界自己的 key，不存在并发覆盖
-      await AsyncStorage.setItem(SESSION_KEY, current);
+      await AsyncStorage.setItem(SESSION_KEY, JSON.stringify({
+        ...latestSession,
+        messages: latestMessages,
+        recentWorldEvents: latestSession.recentWorldEvents || [],
+        worldLog: latestSession.worldLog || [],
+        memories: latestSession.memories || [],
+        currentChapter: latestSession.currentChapter || 0,
+      }));
 
-      // 索引更新：轻量写入，用于首页列表
-      const rawIdx = await AsyncStorage.getItem(INDEX_KEY);
-      const index = rawIdx ? JSON.parse(rawIdx) : {};
-      index[session.id] = {
-        id: session.id,
-        name: session.world?.name || '未知',
-        type: session.world?.type || 'custom',
-        charCount: session.selectedCharacters?.length || 0,
-        msgCount: (msgs ?? messages).length,
-        lastActivity: new Date().toISOString(),
-        hasNovelId: !!session.worldNovelId,
-        currentChapter: session.currentChapter || 0,
-      };
-      await AsyncStorage.setItem(INDEX_KEY, JSON.stringify(index));
-    } catch {}
-  };
+      // 索引写入加锁
+      while (indexLock.current) { await new Promise(r => setTimeout(r, 50)); }
+      indexLock.current = true;
+      try {
+        const rawIdx = await AsyncStorage.getItem(INDEX_KEY);
+        const index = rawIdx ? JSON.parse(rawIdx) : {};
+        index[latestSession.id] = {
+          id: latestSession.id,
+          name: latestSession.world?.name || '未知',
+          type: latestSession.world?.type || 'custom',
+          charCount: latestSession.selectedCharacters?.length || 0,
+          msgCount: latestMessages.length,
+          lastActivity: new Date().toISOString(),
+          hasNovelId: !!latestSession.worldNovelId,
+          currentChapter: latestSession.currentChapter || 0,
+        };
+        await AsyncStorage.setItem(INDEX_KEY, JSON.stringify(index));
+      } finally {
+        indexLock.current = false;
+      }
+    } catch { indexLock.current = false; }
+  }, [SESSION_KEY, INDEX_KEY]);
 
   const send = useCallback(async () => {
     if (segments.length === 0 || isGenerating) return;
@@ -215,7 +242,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
         smartScroll();
 
         // 阶段 8: 后处理钩子
-        runPostSendHooks({ session, updated, turnCount, saveSession, setSession, activeChars, lastSimResults });
+        runPostSendHooks({ session: sessionRef.current, updated, turnCount, saveSession, setSession, activeChars, lastSimResults });
       }
     } catch (e: any) {
       const msg = e.message || String(e);
@@ -228,7 +255,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
     } finally {
       setIsGenerating(false);
     }
-  }, [isGenerating, session, messages, segments]);
+  }, [isGenerating, session, messages, segments, saveSession]);
 
   const renderMsg = ({ item }: { item: ChatMessage }) => {
     if (item.role === 'user') {
@@ -253,7 +280,15 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
       return (
         <TouchableOpacity activeOpacity={0.9} onLongPress={handleRegenerate}>
           {inner}
-          <Text style={{ fontSize: 9, color: isDark ? '#5A5450' : '#B8B0A4', paddingLeft: 16, marginTop: -4, marginBottom: 8 }}>长按重新生成</Text>
+          <View style={{ flexDirection: 'row', paddingLeft: 16, marginTop: -2, marginBottom: 8, gap: 8 }}>
+            <TouchableOpacity onPress={() => { recordFeedback(1, item, messages[messages.length - 2], session); setToast({msg:'已反馈',type:'success'}); }}>
+              <Text style={{ fontSize: 13, opacity: 0.5 }}>👍</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => { recordFeedback(0, item, messages[messages.length - 2], session); setToast({msg:'已反馈',type:'success'}); }}>
+              <Text style={{ fontSize: 13, opacity: 0.5 }}>👎</Text>
+            </TouchableOpacity>
+            <Text style={{ fontSize: 9, color: isDark ? '#5A5450' : '#B8B0A4', alignSelf: 'center' }}>长按重生成</Text>
+          </View>
         </TouchableOpacity>
       );
     }
@@ -283,7 +318,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
     <FadeIn style={{ flex: 1 }}>
     <KeyboardAvoidingView style={st.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
       <View style={st.topBar}>
-        <TouchableOpacity onPress={() => { if (isGenerating) showAlert('退出','对话生成中，确定退出？',[{text:'取消'},{text:'退出',style:'destructive',onPress: async () => { await saveSession(); onBack(); }}]); else { saveSession().then(onBack); } }}><Text style={st.backBtn}>← 返回</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => { if (isGenerating) showAlert('退出','对话生成中，确定退出？',[{text:'取消'},{text:'退出',style:'destructive',onPress: async () => { try { await saveSession(); } catch {} finally { onBack(); } }}]); else { saveSession().then(() => onBack()).catch(() => onBack()); } }}><Text style={st.backBtn}>← 返回</Text></TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={st.topName}>{session.world?.name || '世界'}</Text>
           <Text style={st.topStatus}>{session.selectedCharacters.length}个角色 · 第{turnCount.current + 1}轮{session.worldNovelId ? ' · 第' + ((session.currentChapter || 0) + 1) + '章' : ''}</Text>

@@ -187,6 +187,9 @@ export interface PromptResult {
   scenarioBlock: string;
 }
 
+// ── 跨轮次的微调状态（模块级变量，整个 session 生命周期内有效）──
+let activeTuningAdjustments: import('./promptTuner').PromptAdjustment[] = [];
+
 export async function assemblePrompt(
   session: WorldSession,
   msgsWithUser: ChatMessage[],
@@ -222,6 +225,31 @@ export async function assemblePrompt(
     ? '\n风格特征：\n' + (session.world as any).styleFeatures
     : '';
 
+  // 反馈闭环：差评即时微调 + 好评 few-shot
+  let tuningBlock = '';
+  try {
+    const { getRecentBadFeedback, getGoodSamples } = require('./feedbackStore');
+    const recentBad = await getRecentBadFeedback(5);
+    if (recentBad.length > 0) {
+      const recentGood = await getGoodSamples(20);
+      const { computeAdjustments } = require('./promptTuner');
+      const currentChars = session.selectedCharacters.map(c => c.name);
+      const result = computeAdjustments(recentBad, activeTuningAdjustments);
+      activeTuningAdjustments = result.updatedAdjustments;
+      if (result.tuningText) tuningBlock += result.tuningText;
+      
+      if (recentGood.length >= 3) {
+        const { findSimilarSamples } = require('./promptTuner');
+        const samples = findSimilarSamples(
+          session.currentScene || '', currentChars,
+          recentGood.map((e: any) => ({ userMsg: e.userMessage, aiResponse: e.aiResponsePreview, scene: e.scene, characters: e.activeCharacters, rating: 1 as const })),
+          1
+        );
+        if (samples.length > 0) tuningBlock += '\n[参考：之前类似场景的高质量回复]\n' + samples[0].aiResponse.slice(0, 200);
+      }
+    }
+  } catch {}
+
   const prompt = [
     {
       role: 'system' as const,
@@ -234,6 +262,7 @@ export async function assemblePrompt(
         bedrockText,
         scenarioBlock,
         styleFeat,
+        tuningBlock,
         isFanfic ? VOCAB_LOCK : '',
         ...WORLD_RULES,
         '\n场景：' + (session.currentScene || '未知地点'),
