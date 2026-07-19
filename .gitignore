@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+
+# Android
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+*.apk
+*.aab
+*.keystore
+
+# 但发布包和构建产物例外
+!/发布包/*.apk
+!/发布包/*.aab
+!Android构建/app/build/outputs/apk/release/*.apk
+
+# iOS
+ios/Pods/
+ios/build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Personal (uncomment to hide)
+# assets/reward.png
+
+# Metro
+.metro-health-check*
+
+# Backup
+Desktop/
+
+# Temp
+*.log
+npm-debug.log*

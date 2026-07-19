@@ -2,7 +2,7 @@
   "expo": {
     "name": "Koyoi",
     "slug": "koyoi",
-    "version": "2.14.0",
+    "version": "2.16.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",

@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 //  Koyoi v2 - 世界中心架构
 //  首页=世界列表, 角色卡在"角色"tab, 亲密度世界内隔离
 // ============================================================
@@ -6,26 +6,27 @@ import React, { useState, useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, AppState, BackHandler, Animated } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useConfigStore } from './src/store/configStore';
-import { useCharacterStore } from './src/store/characterStore';
-import { usePersonaStore } from './src/store/personaStore';
-import { useUsageStore } from './src/store/usageStore';
-import FadeIn from './src/components/FadeIn';
-import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
+import { useConfigStore } from './源码/store/configStore';
+import { useCharacterStore } from './源码/store/characterStore';
+import { usePersonaStore } from './源码/store/personaStore';
+import { useUsageStore } from './源码/store/usageStore';
+import FadeIn from './源码/components/FadeIn';
+import { ThemeProvider, useTheme } from './源码/theme/ThemeContext';
 
-import HomeScreen from './src/screens/HomeScreen';
-import SettingsScreen from './src/screens/SettingsScreen';
-import CreateScreen from './src/screens/CreateScreen';
-import CharacterDetail from './src/screens/CharacterDetail';
-import CharactersTab from './src/screens/CharactersTab';
-import WorldSetupScreen from './src/screens/WorldSetupScreen';
-import WorldChatScreen from './src/screens/WorldChatScreen';
-import WorldErrorBoundary from './src/components/WorldErrorBoundary';
-import FanficScreen from './src/screens/FanficScreen';
-import ErrorBoundary from './src/components/ErrorBoundary';
-import { AnimatedAlertProvider } from './src/components/AnimatedAlert';
-import DisclaimerScreen from './src/components/DisclaimerScreen';
-import type { Character, WorldSession } from './src/types';
+import HomeScreen from './源码/screens/HomeScreen';
+import SettingsScreen from './源码/screens/SettingsScreen';
+import CreateScreen from './源码/screens/CreateScreen';
+import CharacterDetail from './源码/screens/CharacterDetail';
+import CharactersTab from './源码/screens/CharactersTab';
+import WorldSetupScreen from './源码/screens/WorldSetupScreen';
+import WorldChatScreen from './源码/screens/WorldChatScreen';
+import WorldErrorBoundary from './源码/components/WorldErrorBoundary';
+import SplashScreen from './源码/components/SplashScreen';
+import FanficScreen from './源码/screens/FanficScreen';
+import ErrorBoundary from './源码/components/ErrorBoundary';
+import { AnimatedAlertProvider } from './源码/components/AnimatedAlert';
+import DisclaimerScreen from './源码/components/DisclaimerScreen';
+import type { Character, WorldSession } from './源码/types';
 
 type Tab = 'home' | 'characters' | 'create' | 'settings';
 const THEME_KEY = '@koyoi_theme';
@@ -45,10 +46,18 @@ function AppContent() {
   const { mode, t, setMode } = useTheme();
   const isDark = mode === 'dark';
   const [disclaimerAgreed, setDisclaimerAgreed] = useState(true);
+  const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
     AsyncStorage.getItem('@koyoi_disclaimer').then(v => setDisclaimerAgreed(v === 'true'));
   }, []);
+
+  // 启动动画 2.2 秒后自动结束
+  useEffect(() => {
+    const timer = setTimeout(() => setShowSplash(false), 2500);
+    return () => clearTimeout(timer);
+  }, []);
+
   const agreeDisclaimer = () => { AsyncStorage.setItem('@koyoi_disclaimer', 'true'); setDisclaimerAgreed(true); };
 
   const [activeTab, setActiveTab] = useState<Tab>('home');
@@ -61,9 +70,12 @@ function AppContent() {
   const [detailChar, setDetailChar] = useState<Character | null>(null);
 
   useEffect(() => {
-    loadConfigs();
-    useCharacterStore.getState().loadCharacters();
-    usePersonaStore.getState().load();
+    // 并行加载所有存储，减少冷启动等待
+    Promise.all([
+      loadConfigs(),
+      useCharacterStore.getState().loadCharacters(),
+      usePersonaStore.getState().load(),
+    ]).catch(() => {});
     // 后台时强制保存用量
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'background' || state === 'inactive') {
@@ -93,7 +105,10 @@ function AppContent() {
   // ===== 世界持久化辅助 =====
   const saveWorldSession = async (session: WorldSession) => {
     try {
+<<<<<<< HEAD
       // 新格式：独立 key + 索引
+=======
+>>>>>>> a3c5b89 (v2.16.0 - 源码重构至中文目录 | 知识图谱/记忆管理器/世界时钟 | 情绪惯性/谣言传播/行为合成 | 角色卡导入器/会话存储/反馈闭环 | 修复记忆丢失 | 安装包更新)
       await AsyncStorage.setItem('@koyoi_session_' + session.id, JSON.stringify(session));
       const rawIdx = await AsyncStorage.getItem('@koyoi_world_index');
       const index = rawIdx ? JSON.parse(rawIdx) : {};
@@ -108,7 +123,11 @@ function AppContent() {
         currentChapter: session.currentChapter || 0,
       };
       await AsyncStorage.setItem('@koyoi_world_index', JSON.stringify(index));
+<<<<<<< HEAD
     } catch {}
+=======
+    } catch (e) { console.warn('[App] saveWorldSession failed:', (e as Error).message); }
+>>>>>>> a3c5b89 (v2.16.0 - 源码重构至中文目录 | 知识图谱/记忆管理器/世界时钟 | 情绪惯性/谣言传播/行为合成 | 角色卡导入器/会话存储/反馈闭环 | 修复记忆丢失 | 安装包更新)
   };
 
   // ===== 世界对话 =====
@@ -238,6 +257,10 @@ function AppContent() {
       </View>
       </ErrorBoundary>
     );
+  }
+
+  if (showSplash) {
+    return <SplashScreen onFinish={() => setShowSplash(false)} />;
   }
 
     if (!disclaimerAgreed) return <DisclaimerScreen visible={true} onAgree={agreeDisclaimer} onExit={() => BackHandler.exitApp()} />;

@@ -1,6 +1,6 @@
 {
   "name": "koyoi",
-  "version": "2.14.0",
+  "version": "2.16.0",
   "private": false,
   "main": "index.ts",
   "description": "AI驱动的成人文字游戏 — 上传小说，魂穿到故事中。支持 DeepSeek V4，完全本地存储。",
