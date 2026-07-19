@@ -105,10 +105,7 @@ function AppContent() {
   // ===== 世界持久化辅助 =====
   const saveWorldSession = async (session: WorldSession) => {
     try {
-<<<<<<< HEAD
       // 新格式：独立 key + 索引
-=======
->>>>>>> a3c5b89 (v2.16.0 - 源码重构至中文目录 | 知识图谱/记忆管理器/世界时钟 | 情绪惯性/谣言传播/行为合成 | 角色卡导入器/会话存储/反馈闭环 | 修复记忆丢失 | 安装包更新)
       await AsyncStorage.setItem('@koyoi_session_' + session.id, JSON.stringify(session));
       const rawIdx = await AsyncStorage.getItem('@koyoi_world_index');
       const index = rawIdx ? JSON.parse(rawIdx) : {};
@@ -123,11 +120,7 @@ function AppContent() {
         currentChapter: session.currentChapter || 0,
       };
       await AsyncStorage.setItem('@koyoi_world_index', JSON.stringify(index));
-<<<<<<< HEAD
-    } catch {}
-=======
     } catch (e) { console.warn('[App] saveWorldSession failed:', (e as Error).message); }
->>>>>>> a3c5b89 (v2.16.0 - 源码重构至中文目录 | 知识图谱/记忆管理器/世界时钟 | 情绪惯性/谣言传播/行为合成 | 角色卡导入器/会话存储/反馈闭环 | 修复记忆丢失 | 安装包更新)
   };
 
   // ===== 世界对话 =====
