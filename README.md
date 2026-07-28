@@ -69,15 +69,14 @@
 
 ### 📥 直接下载 APK
 
-前往 [Releases 页面](https://github.com/gucheng910/koyoi/releases/latest) 下载最新版本，选择对应你手机的 APK：
+前往 [Releases 页面](https://github.com/gucheng910/koyoi/releases/latest) 下载最新版本，选择对应你设备的 APK：
 
-| 手机类型 | 下载文件 | 大小 |
+| 设备类型 | 下载文件 | 大小 |
 |---------|------|------|
-| 近几年买的手机（2018+） | `Koyoi-arm64-v8a.apk` | ~32 MB |
-| 老手机（2018 年前） | `Koyoi-armeabi-v7a.apk` | ~26 MB |
-| 不确定选哪个 | `Koyoi-universal.apk` | ~83 MB |
+| 主流 Android 手机（2020+） | `koyoi-v2.17.0-arm64-v8a.apk` | ~67 MB |
+| Android 模拟器 | `koyoi-v2.17.0-x86_64.apk` | ~66 MB |
 
-> 💡 **怎么判断？** 一般 2018 年以后买的手机选 arm64-v8a 就行。不确定的话选 universal，兼容所有手机就是文件大一点。
+> 💡 **怎么判断？** 骁龙/天玑/麒麟/Exynos 处理器 → 选 arm64-v8a。电脑上跑模拟器 → 选 x86_64。
 
 > ⚠️ 安装时如果提示「未知来源」，在设置里允许「安装未知应用」即可。
 
