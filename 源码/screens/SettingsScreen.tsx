@@ -108,7 +108,7 @@ function MainPage({ isDark, onToggleTheme, onNav }: { isDark: boolean; onToggleT
       <Section>
         <Row icon="🔑" label="API 配置" value="DeepSeek V4" onPress={()=>onNav('api')} dark={isDark} />
         <Row icon="❤️" label="赞赏" value="支持 Koyoi" onPress={()=>onNav('reward')} dark={isDark} />
-        <Row icon="ℹ️" label="关于" value="v2.14.0" onPress={()=>onNav('about')} dark={isDark} last />
+        <Row icon="ℹ️" label="关于" value="v2.17.0" onPress={()=>onNav('about')} dark={isDark} last />
       </Section>
 
       <View style={{ height: 60 }} />
@@ -216,11 +216,11 @@ function AboutPage({ isDark, onBack }: { isDark: boolean; onBack: () => void }) 
       <TouchableOpacity onPress={onBack} style={{ paddingLeft: 20, paddingTop: 56, paddingBottom: 12 }}><Text style={{ fontSize: 15, color: '#5B9BD5' }}>← 设置</Text></TouchableOpacity>
       <View style={{ alignItems: 'center', paddingTop: 30 }}>
         <Text style={{ fontSize: 32, fontWeight: '800', color: c.text, marginBottom: 8 }}>Koyoi</Text>
-        <Text style={{ fontSize: 13, color: c.muted }}>版本 2.14.0 · Expo SDK 56</Text>
+        <Text style={{ fontSize: 13, color: c.muted }}>版本 2.17.0 · Expo SDK 56</Text>
       </View>
       <View style={{ paddingHorizontal: 30, marginTop: 30 }}>
         <Text style={{ fontSize: 13, color: c.muted, lineHeight: 22, textAlign: 'center' }}>
-          {'AI 驱动的互动小说应用。上传小说，魂穿到故事中。\n基于 DeepSeek V4，完全本地存储。\n\n免责声明：本应用 AI 生成内容仅供娱乐。\n同人穿越功能旨在为创作者提供灵感，\n请勿上传无版权作品。'}
+          {'打开一本书，走进一个世界。\nAI 驱动的互动小说引擎。\n上传 txt 小说，AI 自动分析角色与剧情，\n让你穿越到故事中，改变命运。\n\n基于 DeepSeek V4，完全本地存储。\n\n免责声明：本应用 AI 生成内容仅供娱乐。\n请勿上传无版权作品。'}
         </Text>
       </View>
       <TouchableOpacity style={{ marginTop: 30, alignSelf: 'center' }} onPress={()=>Linking.openURL('https://github.com/gucheng910/koyoi')}><Text style={{ fontSize: 13, color: '#5B9BD5' }}>GitHub →</Text></TouchableOpacity>
