@@ -39,20 +39,29 @@
 
 ### 世界推演
 - 角色有独立人格（表面性格 + 深层性格 + 防御机制 + 矛盾点）
+- 情绪惯性系统：角色情绪跨轮次累积，未表达的情绪可能在不适当时刻爆发
 - 记忆闪回：每次对话前检索相关记忆注入 prompt
 - 角色自主互动：NPC 之间会自发产生对话和冲突
 - 世界呼吸：背景事件在玩家视线之外继续发生
+- 叙事导演（Director Model）：每 5 轮自动评估叙事节奏，推进剧情或建议转场
+- 谣言传播系统：玩家行为可能被目击并沿社交网络传播
 
 ### 写作质量
 - 多种 AI 提供商支持（任意 OpenAI 兼容 API）（主要兼容deepseek v4）
 - 流式输出 + 可选自动润色（去 AI 味，对齐原著风格）
 - 章节原文注入：AI 始终知道"当前场景在原著哪一段"
 
+### 分析体验
+- 分析进度可视化 + 角色台词卡片 + 剧情时间线逐步浮现
+- 分析完成后自动提取 53+ 角色和 90+ 剧情事件
+
 ### 体验
 - 分组列表式 UI（卡片交错宽度、呼吸灯）
 - 深色/浅色双主题
 - 纯本地存储，仅 API 调用联网
 - 用量追踪（token + 费用）
+- 网络状态检测：断网时自动提示
+- 上下文持久化：退出重进后世界状态完整保留
 
 ## 🛠️ 技术栈
 
@@ -62,8 +71,11 @@
 | 语言 | TypeScript |
 | AI | DeepSeek V4 / 兼容 OpenAI API |
 | 状态 | Zustand |
-| 存储 | AsyncStorage + expo-file-system |
+| 存储 | AsyncStorage + expo-file-system + expo-secure-store |
 | 编码 | 基于 ICU chardet 的 `char-encoding-detector` + 自研 GBK 解码表 |
+| 动画 | react-native-reanimated + moti |
+| 导航 | @react-navigation/native + native-stack + bottom-tabs |
+| 构建 | Gradle（arm64-v8a / x86_64）|
 
 ## 📱 安装
 
