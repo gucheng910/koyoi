@@ -24,7 +24,8 @@ import { generateBackgroundInteraction, applyBackgroundInteraction } from '../se
 import { WORLD_RULES, NARRATOR_BASE, NARRATOR_FANFIC_APPEND, VOCAB_LOCK, POST_HISTORY_BASE } from '../prompts/worldRules';
 import { processInput, maybeGenerateSummary, buildContext, runCharacterSimulation, assemblePrompt, callAI, postProcessResponse, runPostSendHooks } from '../services/sendPipeline';
 import { recordFeedback as rf } from '../services/feedbackStore';
-import { SAFE_TOP, SAFE_BOTTOM } from '../theme/safeArea';
+import { SAFE_TOP } from '../theme/safeArea';
+import { useSafeBottom } from '../theme/useSafeBottom';
 
 interface Props { session: WorldSession; onBack: () => void; isDark: boolean; }
 
@@ -40,7 +41,7 @@ const T = (dark: boolean) => StyleSheet.create({
   speakerName: { fontSize: 11, fontWeight: '600', marginBottom: 4, color: '#5B9BD5' },
   msgText: { fontSize: 15, color: dark ? '#E8DCC8' : '#2D2822', lineHeight: 24 },
   userMsgText: { color: '#FFFFFF' },
-  inputBar: { flexDirection: 'row', paddingHorizontal: 12, paddingBottom: SAFE_BOTTOM, borderTopWidth: 1, borderTopColor: dark ? '#2A2822' : '#E8E4DD', alignItems: 'flex-end' },
+  inputBarBase: { flexDirection: 'row', paddingHorizontal: 12, paddingBottom: 0, borderTopWidth: 1, borderTopColor: dark ? '#2A2822' : '#E8E4DD', alignItems: 'flex-end' },
   textInput: { flex: 1, backgroundColor: dark ? '#1A1814' : '#FFFFFF', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 12, color: dark ? '#E8DCC8' : '#2D2822', fontSize: 15, maxHeight: 120, borderWidth: 1, borderColor: dark ? '#2A2822' : '#E8E4DD' },
   sendBtn: { backgroundColor: '#5B9BD5', borderRadius: 20, paddingHorizontal: 20, paddingVertical: 12, marginLeft: 8 },
   sendBtnOff: { backgroundColor: dark ? '#333' : '#ddd' },
@@ -81,7 +82,8 @@ function normalizeSession(s: any) {
 }
 
 export default function WorldChatScreen({ session: initialSession, onBack, isDark }: Props) {
-      const st = T(isDark);
+  const st = T(isDark, SAFE_TOP);
+  const bottomInset = useSafeBottom();
   const [session, setSession] = useState(initialSession);
   const [messages, setMessages] = useState<ChatMessage[]>(initialSession.messages);
   const [inputText, setInputText] = useState('');
@@ -358,7 +360,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
           ))}
         </View>
       )}
-      <View style={st.inputBar}>
+      <View style={[st.inputBarBase, { paddingBottom: bottomInset }]}>
         <TouchableOpacity onPress={() => commitSegment('speech')} style={{ paddingHorizontal: 6, paddingVertical: 12, marginRight: 2 }}><Text style={{ fontSize: 12, color: '#5B9BD5', fontWeight: '700' }}>说</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => commitSegment('action')} style={{ paddingHorizontal: 6, paddingVertical: 12, marginRight: 4 }}><Text style={{ fontSize: 12, color: '#8A8070', fontWeight: '700' }}>行动</Text></TouchableOpacity>
         <TextInput style={st.textInput} value={inputText} onChangeText={setInputText} placeholder="输入消息..." placeholderTextColor={isDark ? '#555' : '#bbb'} multiline maxLength={2000} editable={!isGenerating} returnKeyType="send" />

@@ -9,7 +9,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useConfigStore } from '../store/configStore';
 import { diagnoseError, repairWorld, mergeRepair } from '../services/worldRepair';
 import type { WorldSession } from '../types';
-import { SAFE_TOP, SAFE_BOTTOM } from '../theme/safeArea';
+import { SAFE_TOP } from '../theme/safeArea';
+import { useSafeBottom } from '../theme/useSafeBottom';
 
 function normalizeSession(s: any): WorldSession {
   if (typeof s.world !== 'object' || !s.world || Array.isArray(s.world)) {
@@ -49,6 +50,7 @@ export default function HomeScreen({ isDark, onEnterWorld, onNewWorld, onNewFanf
   const [configured, setConfigured] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const S = styles(isDark, SAFE_TOP);
+  const bottomInset = useSafeBottom();
   const pulseAnim = useRef(new Animated.Value(0.2)).current;
 
   // 网络状态检测（轻量：ping DeepSeek API）
@@ -195,7 +197,7 @@ export default function HomeScreen({ isDark, onEnterWorld, onNewWorld, onNewFanf
           )
         ) : null}
       </View>
-      <View style={S.actions}>
+      <View style={[S.actionsBase, { marginBottom: bottomInset }]}>
         <TouchableOpacity style={S.btnPrimary} onPress={onNewWorld}><Text style={S.btnPrimaryText}>🌍 新建世界</Text></TouchableOpacity>
         <TouchableOpacity style={S.btnSecondary} onPress={onNewFanfic}><Text style={S.btnSecondaryText}>📖 同人穿越</Text></TouchableOpacity>
       </View>
@@ -251,7 +253,7 @@ function styles(dark: boolean, safeTop?: number) {
     sub: { fontSize: 14, color: c.muted, marginTop: 4 },
     warning: { marginTop: 10, backgroundColor: dark ? '#1A2430' : '#E8F0F8', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, alignSelf: 'flex-start', borderWidth: 1, borderColor: '#5B9BD5' },
     warningText: { color: '#5B9BD5', fontSize: 12, fontWeight: '600' },
-    actions: { flexDirection: 'row', paddingHorizontal: 24, gap: 12, marginBottom: SAFE_BOTTOM },
+    actionsBase: { flexDirection: 'row', paddingHorizontal: 24, gap: 12 },
     btnPrimary: { flex: 1, backgroundColor: '#5B9BD5', borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
     btnPrimaryText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
     btnSecondary: { flex: 1, backgroundColor: dark ? '#1A2430' : '#E8F0F8', borderRadius: 14, paddingVertical: 16, alignItems: 'center', borderWidth: 1, borderColor: '#5B9BD5' },

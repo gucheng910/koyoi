@@ -22,7 +22,8 @@ import WorldSetupScreen from './源码/screens/WorldSetupScreen';
 import WorldChatScreen from './源码/screens/WorldChatScreen';
 import WorldErrorBoundary from './源码/components/WorldErrorBoundary';
 import SplashScreen from './源码/components/SplashScreen';
-import { SAFE_BOTTOM } from './源码/theme/safeArea';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { useSafeBottom } from './源码/theme/useSafeBottom';
 import FanficScreen from './源码/screens/FanficScreen';
 import ErrorBoundary from './源码/components/ErrorBoundary';
 import { AnimatedAlertProvider } from './源码/components/AnimatedAlert';
@@ -35,15 +36,18 @@ const WORLDS_KEY = '@koyoi_world_sessions';
 
 export default function App() {
   return (
-    <ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
         <AnimatedAlertProvider>
           <AppContent />
         </AnimatedAlertProvider>
       </ThemeProvider>
+    </SafeAreaProvider>
   );
 }
 
 function AppContent() {
+  const bottomInset = useSafeBottom();
   const { mode, t, setMode } = useTheme();
   const isDark = mode === 'dark';
   const [disclaimerAgreed, setDisclaimerAgreed] = useState(true);
@@ -304,7 +308,7 @@ function AppContent() {
               
         
         </FadeIn>
-<View style={T.tabBar}>
+<View style={[T.tabBar, { paddingBottom: bottomInset + 8 }]}>
         {[
           { key: 'home' as Tab, icon: '🌍', label: '世界' },
           { key: 'characters' as Tab, icon: '♟', label: '角色' },
@@ -330,7 +334,7 @@ function theme(dark: boolean) {
       flexDirection: 'row', borderTopWidth: 1,
       borderTopColor: dark ? '#1a1a1a' : '#e8e8e8',
       backgroundColor: dark ? '#0d0d0d' : '#fafafa',
-      paddingBottom: SAFE_BOTTOM + 8, paddingTop: 8,
+      paddingBottom: 0, paddingTop: 8,
     },
     tab: { flex: 1, alignItems: 'center', paddingVertical: 4 },
     tabIcon: { fontSize: 18, color: dark ? '#555' : '#bbb', marginBottom: 2 },

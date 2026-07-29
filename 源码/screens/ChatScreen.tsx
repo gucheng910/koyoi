@@ -18,7 +18,9 @@ import { getPresetWorld } from '../prompts/characters/presets';
 import { isRefusal } from '../services/utils';
 import type { Character, ChatMessage } from '../types';
 import FadeIn from '../components/FadeIn';
-import { SAFE_TOP, SAFE_BOTTOM } from '../theme/safeArea';
+import { SAFE_TOP } from '../theme/safeArea';
+import { useSafeBottom } from '../theme/useSafeBottom';
+
 
 interface Props {
   character: Character;
@@ -57,7 +59,7 @@ function getStyles(dark: boolean) {
     msgText: { fontSize: 15, color: dark ? '#E8DCC8' : '#333', lineHeight: 24 },
     userMsgText: { color: '#fff' },
     cursor: { color: '#5577aa' },
-    inputBar: { flexDirection: 'row', paddingHorizontal: 12, paddingBottom: SAFE_BOTTOM, borderTopWidth: 1, borderTopColor: dark ? '#1A1814' : '#e8e8e8', backgroundColor: dark ? '#0D0C0A' : '#FAF8F5', alignItems: 'flex-end' },
+    inputBarBase: { flexDirection: 'row', paddingHorizontal: 12, paddingBottom: 0, borderTopWidth: 1, borderTopColor: dark ? '#1A1814' : '#e8e8e8', backgroundColor: dark ? '#0D0C0A' : '#FAF8F5', alignItems: 'flex-end' },
     textInput: { flex: 1, backgroundColor: dark ? '#1A1814' : '#fff', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 12, color: dark ? '#E8DCC8' : '#1A1814', fontSize: 15, maxHeight: 120, borderWidth: 1, borderColor: dark ? '#333' : '#ddd' },
     sendBtn: { backgroundColor: '#5577aa', borderRadius: 20, paddingHorizontal: 20, paddingVertical: 12, marginLeft: 8, minWidth: 60, alignItems: 'center' },
     sendBtnOff: { backgroundColor: dark ? '#333' : '#ddd' },
@@ -66,7 +68,8 @@ function getStyles(dark: boolean) {
 }
 
 export default function ChatScreen({ character, onBack, isDark }: Props) {
-      const S = getStyles(isDark);
+  const S = getStyles(isDark);
+  const bottomInset = useSafeBottom();
   const {
     messages, setMessages, isGenerating, streamingText, error,
     startGenerating, appendStreamToken,
@@ -301,7 +304,7 @@ export default function ChatScreen({ character, onBack, isDark }: Props) {
         }
       />
 
-      <View style={S.inputBar}>
+      <View style={[S.inputBarBase, { paddingBottom: bottomInset }]}>
         <TextInput
           style={S.textInput}
           value={inputText}
