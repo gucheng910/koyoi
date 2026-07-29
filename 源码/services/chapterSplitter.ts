@@ -79,15 +79,14 @@ export function detectChapters(text: string): ChapterMeta[] {
     return fallbackSplit(text);
   }
 
-  // 过滤：只保留前面有空行或是文件开头的标记
+  // 过滤：保留前面有空行、文件开头、或前面只有空白/标点的标记
   const validMarkers = markers.filter(m => {
     if (m.pos === 0) return true;
-    const before = text.slice(Math.max(0, m.pos - 5), m.pos);
-    // 宽松检测：前5字内是否有换行(\\n\\r)或文件头
-    for (let j = before.length - 1; j >= 0; j--) {
-      if (before[j] === '\n' || before[j] === '\r') return true;
-      if (j === 0 && m.pos <= 10) return true;
-    }
+    if (m.pos <= 15) return true;
+    const before = text.slice(Math.max(0, m.pos - 12), m.pos);
+    // 前12字内有换行或前面纯空白 → 视为有效行首标记
+    const trimmedBefore = before.replace(/[\s \t\u3000\u00A0]+$/, "");
+    if (trimmedBefore && /[\n\r]/.test(trimmedBefore.slice(-3))) return true;
     return false;
   });
 
@@ -95,11 +94,12 @@ export function detectChapters(text: string): ChapterMeta[] {
 
   const chapters: ChapterMeta[] = [];
 
+  // 用 validMarkers 构建连续区间，确保索引不跨 marker 错位
   for (let i = 0; i < validMarkers.length; i++) {
     const start = validMarkers[i].pos;
-    // 章节结束位置：下一个章节标记的开始，或文本末尾
+    // 章节结束位置：下一个 valid 章节标记的开始，或文本末尾
     const end = i + 1 < validMarkers.length
-      ? markers[i + 1].pos
+      ? validMarkers[i + 1].pos
       : text.length;
 
     if (end - start < 100) continue; // 过滤极短节（<100字通常不是正文）

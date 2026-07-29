@@ -92,5 +92,25 @@ export const bouncy = {
   mass: 0.8,
 };
 
+// ── 安全区域辅助（替代硬编码 paddingTop） ──
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+/**
+ * 获取顶部安全区域值（状态栏高度 + 额外空隙）
+ * 替代所有硬编码的 paddingTop: 50/56/60
+ */
+export function useSafeAreaTop(): number {
+  const insets = useSafeAreaInsets();
+  return Math.max(insets.top, 24); // 至少 24px 间隙
+}
+
+/**
+ * 获取底部安全区域值（导航栏高度 + 额外空隙）
+ */
+export function useSafeAreaBottom(): number {
+  const insets = useSafeAreaInsets();
+  return Math.max(insets.bottom, 16);
+}
+
 export type Theme = typeof colors.light;
 export type ThemeMode = 'light' | 'dark';

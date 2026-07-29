@@ -129,7 +129,7 @@ export async function repairWorld(
         prompt,
         { temperature: 0.3, maxTokens: 1000 }
       ),
-    'repair'
+    ''
   );
 
   try {

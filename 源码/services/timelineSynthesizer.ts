@@ -47,11 +47,11 @@ interface SynthesisResult {
 
 function buildSynthesisPrompt(kb: KnowledgeBase): string {
   // 前 50 角色 + 完整信息
-  const topChars = kb.characters.slice(0, 50);
+  const topChars = kb.characters.slice(0, 30);
   const charSummary = topChars.map(c =>
-    `${c.name}（${c.gender}，${c.role}）| 性格：${c.traits.join('/')} | 习惯：${c.habits.join('/') || '无'} | 说话：${c.speechStyle || '未知'} | 出场：第${c.firstAppear+1}~${c.lastAppear+1}章` +
-    (c.speechSamples.length > 0 ? `\n  台词：「${c.speechSamples.slice(0, 5).map(s => s.quote).join('」「')}」` : '')
-  ).join('\n\n');
+    `${c.name}（${c.gender}，${c.role}）| ${c.traits.slice(0, 8).join('/')}` +
+    ` | 出场：第${c.firstAppear+1}~${c.lastAppear+1}章`
+  ).join('\n');
 
   const relSummary = kb.relations.map(r => {
     let s = `${r.from} ↔ ${r.to}：${r.type}（起始第${r.startChapter+1}章）`;
@@ -150,7 +150,7 @@ export async function synthesizeTimeline(
         { role: 'system', content: '你是资深编辑。基于分析数据合成全局时间线。如有疑问可输出 FETCH_CHAPTER:N 来调取原文。' },
         { role: 'user', content: prompt },
       ],
-      { temperature: 0.2 }
+      { temperature: 0.2, maxTokens: 8192 }
     );
 
     // 工具调用循环（最多 2 轮）
@@ -165,15 +165,19 @@ export async function synthesizeTimeline(
           { role: 'assistant', content: raw },
           { role: 'user', content: toolResult },
         ],
-        { temperature: 0.2 }
+        { temperature: 0.2, maxTokens: 8192 }
       );
     }
 
     // 解析结果
     const parsed = safeParseJSON(raw);
-    if (!parsed || !parsed.globalTimeline) return null;
+    if (!parsed || !parsed.globalTimeline) {
+      console.warn('[TIMELINE] parse failed: raw preview=' + (raw || '').slice(0, 200));
+      return null;
+    }
     return parsed as SynthesisResult;
-  } catch {
+  } catch (e: any) {
+    console.warn('[TIMELINE] exception:', e.message);
     return null;
   }
 }

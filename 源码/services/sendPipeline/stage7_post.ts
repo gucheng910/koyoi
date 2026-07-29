@@ -19,6 +19,7 @@ export async function postProcessResponse(
   chapterCtx: any,
   activeChars: React.MutableRefObject<string[]>
 ): Promise<PostProcessResult> {
+  console.log('[PIPELINE] stage7 postProcess start rawLen=' + raw.length);
   let displayText = raw;
 
   if (session.worldNovelId && cfg.autoPolish !== false) {

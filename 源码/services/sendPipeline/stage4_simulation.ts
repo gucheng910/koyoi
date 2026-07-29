@@ -19,6 +19,7 @@ export async function runCharacterSimulation(
   lastSimResults: React.MutableRefObject<Record<string, { intent: string; mood: string }>>,
   attitudes: React.MutableRefObject<Record<string, any>>
 ): Promise<CharacterAction[]> {
+  console.log('[PIPELINE] stage4 simulation start turn=' + turnCount + ' active=' + activeChars.current.length);
   const chars = [
     ...session.selectedCharacters
       .filter(c => activeChars.current.includes(c.name))

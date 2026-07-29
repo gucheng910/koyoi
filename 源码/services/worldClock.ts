@@ -41,6 +41,7 @@ export async function generateWorldPulse(
   session: WorldSession,
   turnCount: number
 ): Promise<ClockResult | null> {
+  console.log('[WORLD] generateWorldPulse turn=' + turnCount);
   const cfg = useConfigStore.getState().getActiveConfig();
   if (!cfg) return null;
 
@@ -151,22 +152,22 @@ function generateCandidates(session: WorldSession, turnCount: number): string[] 
 }
 
 function randomPlace(world: string): string {
-  const places = ['集市', '酒馆', '城门', '寺庙', '河边', '山林', '衙门', '客栈'];
+  const places = ['街角', '路口', '门口', '走廊', '窗边', '后院', '广场', '楼梯口'];
   return places[Math.floor(Math.random() * places.length)];
 }
 
 function randomAction(): string {
-  const actions = ['与人争执了起来', '发现了一样奇怪的东西', '匆匆离开了', '在暗中观察着什么', '做出了一个意外的决定'];
+  const actions = ['遇到了熟人', '发现了一样东西', '匆匆离开了', '在观察着什么', '做了个出人意料的举动'];
   return actions[Math.floor(Math.random() * actions.length)];
 }
 
 function randomWeather(): string {
-  const weather = ['起了风', '下起了细雨', '雾气弥漫', '突然放晴', '雷声隐隐'];
+  const weather = ['传来了声响', '弥漫着某种气氛', '一阵风吹过', '光线暗了下来', '周围安静了片刻'];
   return weather[Math.floor(Math.random() * weather.length)];
 }
 
 function randomConsequence(): string {
-  const consequences = ['让路人纷纷躲避', '引起了小贩们的骚动', '让守卫警惕起来', '没有人注意到'];
+  const consequences = ['让路过的人侧目', '引起了小声议论', '没有人注意到', '被谁看了一眼'];
   return consequences[Math.floor(Math.random() * consequences.length)];
 }
 

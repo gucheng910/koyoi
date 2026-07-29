@@ -11,17 +11,21 @@ import type { KnowledgeGraph } from './knowledgeGraph';
 // 需要被传播的事件关键词
 const NOTABLE_PATTERNS = [
   // 暴力/冲突
-  { regex: /打|揍|踹|扇|推倒|摔|砸|杀|砍|刺|血/i, type: 'public_action' as const, impact: 5 },
+  { regex: /打|揍|踹|扇|推倒|摔|砸|杀|砍|刺|血|吵架|骂|冲突/i, type: 'public_action' as const, impact: 5 },
   // 亲密/情感
-  { regex: /吻|抱|亲|告白|表白|我爱你|喜欢|心动|牵手|依偎/i, type: 'relationship_shift' as const, impact: 4 },
+  { regex: /吻|抱|亲|告白|表白|我爱你|喜欢|心动|牵手|依偎|约会|恋爱/i, type: 'relationship_shift' as const, impact: 4 },
   // 羞辱/权力
-  { regex: /跪下|求饶|侮辱|羞辱|命令|威胁|惩罚|奖赏/i, type: 'public_action' as const, impact: 4 },
+  { regex: /跪下|求饶|侮辱|羞辱|命令|威胁|惩罚|奖赏|批评|训斥/i, type: 'public_action' as const, impact: 4 },
   // 金钱/交易
-  { regex: /金币|银子|宝物|贿赂|交易|买卖|赠送/i, type: 'public_action' as const, impact: 3 },
+  { regex: /钱|付款|买|卖|交易|赠送|借钱|还钱|工资|奖金|便宜|贵/i, type: 'public_action' as const, impact: 3 },
   // 秘密/信息
-  { regex: /秘密|真相|其实|原来|不知道|发现|暴露/i, type: 'private_action' as const, impact: 3 },
+  { regex: /秘密|真相|其实|原来|不知道|发现|暴露|听说|据说|传闻|爆料/i, type: 'private_action' as const, impact: 3 },
   // 场景变化
-  { regex: /离开|进入|到达|前往|消失|出现/i, type: 'scene_change' as const, impact: 2 },
+  { regex: /离开|进入|到达|前往|消失|出现|走进|走出|回到|来到/i, type: 'scene_change' as const, impact: 2 },
+  // 社交/日常
+  { regex: /邀请|约|聚会|吃饭|一起|帮忙|求助|答应|拒绝|同意|商量/i, type: 'public_action' as const, impact: 2 },
+  // 情绪/状态
+  { regex: /哭|笑|叹气|发呆|紧张|尴尬|生气|惊讶|感动|失望|开心|难过/i, type: 'private_action' as const, impact: 2 },
 ];
 
 /**
@@ -33,6 +37,7 @@ export function extractNotableEvents(
   aiResponse: string,
   round: number
 ): NotableEvent[] {
+  console.log('[RUMOR] extractNotableEvents round=' + round);
   const combined = userAction + ' ' + aiResponse.slice(0, 1000);
   const events: NotableEvent[] = [];
 

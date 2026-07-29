@@ -23,12 +23,13 @@ export interface ChapterPosition {
  * @param recentMessages 最近 6 条对话
  * @param kb 知识库（可选，不传则自动加载）
  */
+console.log('[CHAPTER] estimateChapterPosition called');
 export async function estimateChapterPosition(
   cfg: ApiConfig,
   worldId: string,
   prevChapter: number,
   recentMessages: string[],
-  kb?: KnowledgeBase
+  kb?: KnowledgeBase | null
 ): Promise<ChapterPosition | null> {
   try {
     if (!kb) {
@@ -87,6 +88,7 @@ confidence < 0.3 时说明不确定，chapter 可以随便给。
 /**
  * 推进章节（仅在 AI 高置信度报告新章节时更新）
  */
+console.log('[CHAPTER] shouldAdvanceChapter called');
 export function shouldAdvanceChapter(
   prev: number,
   newPos: ChapterPosition | null

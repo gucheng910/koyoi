@@ -96,7 +96,7 @@ export async function chatCompletion(
     if (!config.streamOutput) {
       const data = await response.json();
       updateCacheMetrics(data.usage);
-      recordUsage(config.model, data.usage, startTime);
+      recordUsage(config.model, data.usage, startTime, config);
 
       // 处理 Function Calling
       const choice = data.choices?.[0];
@@ -111,7 +111,7 @@ export async function chatCompletion(
     }
 
     // 流式：逐行解析 SSE
-    return readStream(response, onToken, onComplete, onError, config.model, startTime);
+    return readStream(response, onToken, onComplete, onError, config.model, startTime, config);
 
   } catch (e: any) {
     if (e.name === 'AbortError') return '';
@@ -133,8 +133,11 @@ export async function chatCompletionSync(
     messages,
     max_tokens: options?.maxTokens ?? config.maxTokens ?? 4096,
     stream: false,
-    safety_filter: config.safetyFilter,
   };
+
+  if (config.safetyFilter !== 'moderate') {
+    body.safety_filter = config.safetyFilter;
+  }
 
   if (options?.tools?.length) body.tools = options.tools;
 
@@ -175,7 +178,7 @@ export async function chatCompletionSync(
 
   const data = await response.json();
   updateCacheMetrics(data.usage);
-  recordUsage(config.model, data.usage, Date.now());
+  recordUsage(config.model, data.usage, Date.now(), config);
 
   const msg = data.choices?.[0]?.message;
   // 处理 tool calls
@@ -246,7 +249,8 @@ async function readStream(
   onComplete?: (fullText: string) => void,
   onError?: (error: Error) => void,
   model?: string,
-  startTime?: number
+  startTime?: number,
+  config?: ApiConfig
 ): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) throw new Error('无法读取响应流');
@@ -281,7 +285,7 @@ async function readStream(
           }
           if (parsed.usage) {
             updateCacheMetrics(parsed.usage);
-            if (model && startTime) recordUsage(model, parsed.usage, startTime);
+            if (model && startTime && config) recordUsage(model, parsed.usage, startTime, config);
           }
         } catch {
           // 忽略解析错误
@@ -312,7 +316,7 @@ function updateCacheMetrics(usage: any) {
   }
 }
 
-function recordUsage(model: string, usageData: any, startTime: number) {
+function recordUsage(model: string, usageData: any, startTime: number, config: ApiConfig) {
   if (!usageData) return;
   const input = (usageData.prompt_tokens || 0);
   const output = (usageData.completion_tokens || 0);
@@ -412,7 +416,7 @@ async function handleFunctionCallLoop(
 
   const data = await response.json();
   updateCacheMetrics(data.usage);
-  recordUsage(config.model, data.usage, Date.now());
+  recordUsage(config.model, data.usage, Date.now(), config);
   const content = data.choices?.[0]?.message?.content || toolResults.join('\n');
   params.onComplete?.(content);
   return content;

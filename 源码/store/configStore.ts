@@ -55,22 +55,33 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
 
   loadConfigs: async () => {
     try {
-      const raw = await SecureStore.getItemAsync(CONFIG_LIST_KEY);
+      // 添加 5 秒超时，防止 SecureStore 在模拟器上卡死
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('SecureStore timeout')), 5000));
+      const raw = await Promise.race([
+        SecureStore.getItemAsync(CONFIG_LIST_KEY),
+        timeoutPromise
+      ]) as string | null;
       let configs: ApiConfig[];
       if (raw) {
         configs = JSON.parse(raw);
       } else {
         const defaultConfig = createDefaultConfig();
         configs = [defaultConfig];
-        await SecureStore.setItemAsync(CONFIG_LIST_KEY, JSON.stringify(configs));
+        SecureStore.setItemAsync(CONFIG_LIST_KEY, JSON.stringify(configs)).catch(() => {});
       }
       const activeId = configs.find(c => c.isDefault)?.id || configs[0]?.id || null;
       // 加载分析配置
-      const aRaw = await SecureStore.getItemAsync(ANALYSIS_CONFIG_KEY);
-      const analysisConfig = aRaw ? JSON.parse(aRaw) : null;
+      let analysisConfig: ApiConfig | null = null;
+      try {
+        const aRaw = await Promise.race([
+          SecureStore.getItemAsync(ANALYSIS_CONFIG_KEY),
+          timeoutPromise
+        ]) as string | null;
+        analysisConfig = aRaw ? JSON.parse(aRaw) : null;
+      } catch {}
       set({ configs, activeConfigId: activeId, analysisConfig, isLoaded: true });
     } catch (e) {
-      console.error('Failed to load configs:', e);
+      console.warn('Failed to load configs, using defaults:', e);
       const defaultConfig = createDefaultConfig();
       set({ configs: [defaultConfig], activeConfigId: defaultConfig.id, analysisConfig: null, isLoaded: true });
     }

@@ -18,6 +18,7 @@ import { getPresetWorld } from '../prompts/characters/presets';
 import { isRefusal } from '../services/utils';
 import type { Character, ChatMessage } from '../types';
 import FadeIn from '../components/FadeIn';
+import { SAFE_TOP, SAFE_BOTTOM } from '../theme/safeArea';
 
 interface Props {
   character: Character;
@@ -30,8 +31,9 @@ const HISTORY_PREFIX = '@koyoi_history_';
 function getStyles(dark: boolean) {
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: dark ? '#0D0C0A' : '#FAF8F5' },
-    topBar: {
-      flexDirection: 'row', alignItems: 'center', paddingTop: 50, paddingBottom: 12,
+    // topBar paddingTop 在组件中用 useSafeAreaInsets 动态计算
+    topBarBase: {
+      flexDirection: 'row', alignItems: 'center', paddingBottom: 12,
       paddingHorizontal: 16, borderBottomWidth: 1,
       borderBottomColor: dark ? '#1A1814' : '#ddd',
       backgroundColor: dark ? '#0D0C0A' : '#FAF8F5',
@@ -55,7 +57,7 @@ function getStyles(dark: boolean) {
     msgText: { fontSize: 15, color: dark ? '#E8DCC8' : '#333', lineHeight: 24 },
     userMsgText: { color: '#fff' },
     cursor: { color: '#5577aa' },
-    inputBar: { flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: dark ? '#1A1814' : '#e8e8e8', backgroundColor: dark ? '#0D0C0A' : '#FAF8F5', alignItems: 'flex-end' },
+    inputBar: { flexDirection: 'row', paddingHorizontal: 12, paddingBottom: SAFE_BOTTOM, borderTopWidth: 1, borderTopColor: dark ? '#1A1814' : '#e8e8e8', backgroundColor: dark ? '#0D0C0A' : '#FAF8F5', alignItems: 'flex-end' },
     textInput: { flex: 1, backgroundColor: dark ? '#1A1814' : '#fff', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 12, color: dark ? '#E8DCC8' : '#1A1814', fontSize: 15, maxHeight: 120, borderWidth: 1, borderColor: dark ? '#333' : '#ddd' },
     sendBtn: { backgroundColor: '#5577aa', borderRadius: 20, paddingHorizontal: 20, paddingVertical: 12, marginLeft: 8, minWidth: 60, alignItems: 'center' },
     sendBtnOff: { backgroundColor: dark ? '#333' : '#ddd' },
@@ -64,7 +66,7 @@ function getStyles(dark: boolean) {
 }
 
 export default function ChatScreen({ character, onBack, isDark }: Props) {
-  const S = getStyles(isDark);
+      const S = getStyles(isDark);
   const {
     messages, setMessages, isGenerating, streamingText, error,
     startGenerating, appendStreamToken,
@@ -249,7 +251,7 @@ export default function ChatScreen({ character, onBack, isDark }: Props) {
   return (
     
     <FadeIn style={{ flex: 1 }}><KeyboardAvoidingView style={S.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
-      <View style={S.topBar}>
+      <View style={[S.topBarBase, { paddingTop: SAFE_TOP }]}>
         <TouchableOpacity onPress={onBack} style={S.backBtn}>
           <Text style={S.backBtnText}>← 返回</Text>
         </TouchableOpacity>

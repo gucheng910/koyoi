@@ -20,7 +20,8 @@ export interface BreatheWorldParams {
 export async function breatheWorld(params: BreatheWorldParams): Promise<void> {
   const { session, setSession, turnCount } = params;
   const cfg = useConfigStore.getState().getActiveConfig();
-  if (!cfg) return;
+  if (!cfg) { console.log('[WORLD] breatheWorld skipped: no config'); return; }
+  console.log('[WORLD] breatheWorld start turn=' + turnCount);
 
   try {
     const lastEvents = (session.worldLog || []).filter(e => e.type === 'world_event' || e.type === 'chain_reaction').slice(-3);

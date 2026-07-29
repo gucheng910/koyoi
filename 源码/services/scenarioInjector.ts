@@ -5,7 +5,7 @@
 // ============================================================
 
 import { chatCompletionSync } from '../api/deepseek';
-import type { ChatMessage, WorldSession } from '../types';
+import type { ChatMessage, WorldSession, ApiConfig } from '../types';
 
 export interface ScenarioContext {
   /** 检索到的相关记忆（1-3 条） */
@@ -26,7 +26,7 @@ export interface ScenarioContext {
  * @param recentMessages 最近 4 条消息
  */
 async function recallMemories(
-  cfg: { apiKey: string; baseUrl: string },
+  cfg: Pick<ApiConfig, 'apiKey' | 'baseUrl' | 'model'>,
   memories: string[],
   recentMessages: string
 ): Promise<string[]> {
@@ -45,7 +45,7 @@ async function recallMemories(
       },
     ];
     const raw = await chatCompletionSync(
-      { ...cfg, model: cfg.model || 'deepseek-v4-flash', thinkingMode: 'disabled', maxTokens: 50, temperature: 0, safetyFilter: 'off', streamOutput: false, showSystemPrompt: false, autoPolish: false, isDefault: false },
+      { ...cfg, id: '', label: '', reasoningEffort: 'high' as const, model: cfg.model || 'deepseek-v4-flash', thinkingMode: 'disabled', maxTokens: 50, temperature: 0, safetyFilter: 'off', streamOutput: false, showSystemPrompt: false, autoPolish: false, isDefault: false },
       prompt,
       { maxTokens: 50, temperature: 0 }
     );
@@ -95,7 +95,7 @@ function getRecentWorldEvents(session: WorldSession, max: number = 3): string {
 export async function enhanceWithScenario(
   session: WorldSession,
   recentMessages: ChatMessage[],
-  cfg: { apiKey: string; baseUrl: string }
+  cfg: Pick<ApiConfig, 'apiKey' | 'baseUrl' | 'model'>
 ): Promise<ScenarioContext> {
   const recentText = recentMessages.slice(-4).map(m => m.content).join('\n');
   const memories = session.memories || [];

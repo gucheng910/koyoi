@@ -7,6 +7,7 @@ import { showAlert } from '../components/AnimatedAlert';
 import { useCharacterStore } from '../store/characterStore';
 import { getPresetWorld } from '../prompts/characters/presets';
 import type { Character } from '../types';
+import { SAFE_TOP } from '../theme/safeArea';
 
 interface Props { character: Character; onBack: () => void; onStart: (c: Character) => void; isDark: boolean; }
 
@@ -37,13 +38,13 @@ function Row({ label, value, last, dark }: { label: string; value: string; last?
 }
 
 export default function CharacterDetail({ character, onBack, onStart, isDark }: Props) {
-  const c = colors(isDark);
+      const c = colors(isDark);
   const { deleteCharacter } = useCharacterStore();
   const world = getPresetWorld(character.worldId);
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: 50, paddingBottom: 12, paddingHorizontal: 16 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingTop: SAFE_TOP, paddingBottom: 12, paddingHorizontal: 16 }}>
         <TouchableOpacity onPress={onBack}><Text style={{ fontSize: 15, color: c.accent }}>← 返回</Text></TouchableOpacity>
         <Text style={{ flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700', color: c.text }}>{character.name}</Text>
         <TouchableOpacity onPress={async () => { try { await Share.share({ message: JSON.stringify(character, null, 2), title: character.name + '.json' }); } catch {} }}><Text style={{ fontSize: 13, color: c.accent, marginRight: 12 }}>导出</Text></TouchableOpacity>
@@ -59,7 +60,6 @@ export default function CharacterDetail({ character, onBack, onStart, isDark }: 
 
         <Section title="基础">
           <Row label="年龄" value={character.age} dark={isDark} />
-          <Row label="性别" value={character.gender === 'female' ? '女' : '男'} dark={isDark} />
           <Row label="世界" value={world?.name || '自定义'} dark={isDark} />
           <Row label="身高" value={character.appearance.height} dark={isDark} />
           <Row label="体型" value={character.appearance.bodyType} dark={isDark} />
@@ -78,13 +78,6 @@ export default function CharacterDetail({ character, onBack, onStart, isDark }: 
         </Section>
 
         <Section title="设定">
-          <Row label="欲望" value={character.sexualProfile.libido + '/10'} dark={isDark} />
-          <Row label="经验" value={character.sexualProfile.experience + '/10'} dark={isDark} />
-          <Row label="倾向" value={character.sexualProfile.dominance + '/10'} dark={isDark} />
-          <Row label="喜好" value={(character.sexualProfile.kinks || []).join('、') || '未设定'} dark={isDark} />
-          <Row label="软限" value={(character.sexualProfile.softLimits || []).join('、') || '未设定'} dark={isDark} />
-          <Row label="硬限" value={(character.sexualProfile.hardLimits || []).join('、') || '未设定'} dark={isDark} />
-          <Row label="敏感" value={(character.sexualProfile.sensitiveZones || []).join('、') || '未设定'} dark={isDark} last />
         </Section>
 
         {character.memories.length > 0 && (

@@ -54,7 +54,7 @@ export function kbCharToCharacter(c: KbCharacter, worldId: string, idx: number, 
       dislikes: [],
       ...(deepBackstory ? { _deepProfile: deepBackstory } : {}),
     } as any,
-    sexualProfile: { libido: 5, experience: 3, dominance: 5, kinks: [], softLimits: [], hardLimits: [], sensitiveZones: [], sexualResponse: '' },
+    
     relationship: { intimacy: 0, trust: 0, submission: 0, arousal: 0, status: c.role },
     backstory: deepBackstory || `出场：第${(c.firstAppear || 0) + 1}~${(c.lastAppear || 0) + 1}章`,
     worldContext: { type: 'fanfic', sourceNovel: sourceNovel || '', originalRole: c.role, originalFate: '' },

@@ -33,7 +33,6 @@ export function getWorldInfo(
     allEntries.push({ key: new RegExp(loc.name, 'i'), content: `${loc.name}: ${loc.description}`, priority: 60, source: 'loc_' + loc.name });
   }
   allEntries.push({ key: /世界|这里|地方/, content: `${session.world.name}: ${session.world?.rules?.supernatural || ""} | ${session.world?.rules?.society || ""}`, priority: 40, source: 'world_rules' });
-  allEntries.push({ key: /规则|法律|允许|禁止/, content: `性观念: ${session.world?.rules?.sexualNorms || ""}`, priority: 30, source: 'sexual_norms' });
 
   const activated = new Map<string, WiEntry>();
   if (session.currentScene) {

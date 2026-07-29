@@ -12,9 +12,11 @@ import { extractMemories } from '../worldInfoService';
 import { generateBackgroundInteraction, applyBackgroundInteraction } from '../backgroundInteraction';
 import { loadKnowledgeBase } from '../knowledgeBase';
 import { KnowledgeGraph } from '../knowledgeGraph';
-import { decayMoods } from '../emotionalInertia';
+import { decayMoods, updateMoods } from '../emotionalInertia';
 import { generateWorldPulse } from '../worldClock';
 import { extractNotableEvents, propagateRumors } from '../rumorPropagation';
+import { consultDirector } from '../narrativeDirector';
+import type { DirectorDecision } from '../narrativeDirector';
 import type { WorldSession, ChatMessage } from '../../types';
 import type { CharacterAction } from '../characterSimulator';
 
@@ -32,6 +34,7 @@ export interface PostSendHooksParams {
 
 export async function runPostSendHooks(params: PostSendHooksParams) {
   const { updated, turnCount, saveSession, setSession, session, charActions, userMsg } = params;
+  console.log('[PIPELINE] stage8 hooks start turn=' + turnCount.current);
 
   turnCount.current++;
 
@@ -39,6 +42,15 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
   session.worldClock = (session.worldClock || 0) + 1;
   setSession(prev => ({ ...prev, worldClock: session.worldClock }));
 
+  // 情绪惯性：将角色推演结果同步到情绪系统
+  if (charActions && charActions.length > 0) {
+    const updatedMoodsFromActions = updateMoods(charActions, session.characterMoods || {}, turnCount.current);
+    session.characterMoods = updatedMoodsFromActions;
+    setSession(prev => ({ ...prev, characterMoods: updatedMoodsFromActions }));
+    console.log('[MOOD] updated from ' + Object.keys(session.characterMoods || {}).length + ' chars');
+  }
+
+  // 情绪衰减（即使没有推演结果也执行）
   const updatedMoods = decayMoods(
     session.characterMoods || {},
     turnCount.current
@@ -87,6 +99,17 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
     saveSession(updated);
   }
 
+  // 叙事导演：每 5 轮评估节奏
+  if (turnCount.current % 5 === 0) {
+    consultDirector(session, updated, turnCount.current, session.currentChapter || 0).then(dir => {
+      if (dir) {
+        (session as any).directorDecision = dir;
+        setSession(prev => ({ ...prev, directorDecision: dir as any }));
+        console.log('[DIRECTOR] pacing=' + dir.pacing + ' focus=' + dir.suggestedFocus.slice(0, 30));
+      }
+    }).catch(() => {});
+  }
+
   if (turnCount.current % 3 === 0 && session.worldNovelId) {
     const cfg = useConfigStore.getState().getActiveConfig();
     if (cfg) {
@@ -118,13 +141,21 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
     }
   }
 
-  if (turnCount.current % 5 === 0 && session.selectedCharacters.length >= 2) {
+  if (turnCount.current % 5 === 0 && (session.selectedCharacters.length + (session.npcs || []).length) >= 2) {
     const bcfg = useConfigStore.getState().getActiveConfig();
     if (bcfg) {
-      const activeList = session.selectedCharacters.map(c => ({
-        name: c.name, personality: c.personality.traits.join('/'),
-        status: c.currentContext?.mood || '平静', relationship: c.relationship?.status || '陌生人',
-      }));
+      // 合并选中角色 + 世界 NPC + 世界角色库中的未出场角色
+      const allChars = [
+        ...session.selectedCharacters.map(c => ({
+          name: c.name, personality: c.personality.traits.join('/'),
+          status: c.currentContext?.mood || '平静', relationship: c.relationship?.status || '陌生人',
+        })),
+        ...(session.npcs || []).map(n => ({
+          name: n.name, personality: n.personality || '未知',
+          status: n.currentStatus || '平静', relationship: '路人',
+        })),
+      ];
+      const activeList = allChars.slice(0, 6);
       generateBackgroundInteraction(bcfg, activeList, session.currentScene || '未知场景')
         .then((interaction: any) => {
           if (interaction) setSession(prev => applyBackgroundInteraction(prev, interaction));

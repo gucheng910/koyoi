@@ -5,6 +5,7 @@
 // ============================================================
 
 import * as FileSystem from 'expo-file-system/legacy';
+// @ts-expect-error Metro bundler handles ESM/CommonJS interop
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ChapterMeta, NovelMeta } from '../types';
 

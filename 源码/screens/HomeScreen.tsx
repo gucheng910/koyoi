@@ -9,6 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useConfigStore } from '../store/configStore';
 import { diagnoseError, repairWorld, mergeRepair } from '../services/worldRepair';
 import type { WorldSession } from '../types';
+import { SAFE_TOP, SAFE_BOTTOM } from '../theme/safeArea';
 
 function normalizeSession(s: any): WorldSession {
   if (typeof s.world !== 'object' || !s.world || Array.isArray(s.world)) {
@@ -44,10 +45,32 @@ function getWorldColor(type: string) { const m: Record<string,string> = {modern:
 interface Props { isDark: boolean; onEnterWorld: (session: WorldSession) => void; onNewWorld: () => void; onNewFanfic: () => void; onViewCharacters: () => void; }
 
 export default function HomeScreen({ isDark, onEnterWorld, onNewWorld, onNewFanfic, onViewCharacters }: Props) {
-  const [sessions, setSessions] = useState<WorldSession[]>([]);
+      const [sessions, setSessions] = useState<WorldSession[]>([]);
   const [configured, setConfigured] = useState(false);
-  const S = styles(isDark);
+  const [isOnline, setIsOnline] = useState(true);
+  const S = styles(isDark, SAFE_TOP);
   const pulseAnim = useRef(new Animated.Value(0.2)).current;
+
+  // 网络状态检测（轻量：ping DeepSeek API）
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const ctrl = new AbortController();
+        setTimeout(() => ctrl.abort(), 5000);
+        const r = await fetch('https://api.deepseek.com/v1/models', {
+          method: 'HEAD',
+          signal: ctrl.signal,
+        });
+        if (!cancelled) setIsOnline(r.ok || r.status === 401);
+      } catch {
+        if (!cancelled) setIsOnline(false);
+      }
+    };
+    check();
+    const interval = setInterval(check, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
 
   // 呼吸灯
   useEffect(() => {
@@ -148,6 +171,11 @@ export default function HomeScreen({ isDark, onEnterWorld, onNewWorld, onNewFanf
     <View style={S.container}>
       {/* 呼吸灯 */}
       <Animated.View style={[S.breathe, { opacity: pulseAnim }]} />
+      {!isOnline ? (
+        <View style={{ backgroundColor: '#e74c3c', paddingVertical: 6, paddingHorizontal: 16, alignItems: 'center' }}>
+          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>⚠ 网络不可用，部分功能可能受限</Text>
+        </View>
+      ) : null}
       <View style={S.header}>
         <Text style={S.title}>Koyoi</Text>
         <Text style={S.sub}>选择一个世界，开始你的故事</Text>
@@ -197,7 +225,7 @@ export default function HomeScreen({ isDark, onEnterWorld, onNewWorld, onNewFanf
                   {item.selectedCharacters.map(c=>c.name).slice(0,3).join('、')||'无角色'}{(item.selectedCharacters||[]).length>3?' 等'+item.selectedCharacters.length+'人':''}
                 </Text>
                 <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
-                  <Text style={S.cardStat}>{item.messages.length}轮</Text>
+                  <Text style={S.cardStat}>{Math.floor(item.messages.length / 2) || 1}轮</Text>
                   {(item as any).worldNovelId ? <Text style={[S.cardStat, { color: '#5B9BD5', fontWeight: '600' }]}>{formatChapter(item)}</Text> : null}
                   <Text style={S.cardStat}>{formatRelativeTime(lastTs)}</Text>
                 </View>
@@ -210,19 +238,20 @@ export default function HomeScreen({ isDark, onEnterWorld, onNewWorld, onNewFanf
   );
 }
 
-function styles(dark: boolean) {
+function styles(dark: boolean, safeTop?: number) {
+  const SAFE_TOP = safeTop ?? 56;
   const c = dark
     ? { bg: '#0E0D0B', card: '#1C1912', border: '#2C2A22', text: '#E8DCC8', muted: '#8A8070', faded: '#5A5450' }
     : { bg: '#F8F9FA', card: '#FFFFFF', border: '#E8E4DD', text: '#2D2822', muted: '#8A8070', faded: '#B8B0A4' };
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: c.bg },
     breathe: { position: 'absolute', top: 0, left: '50%', width: 60, height: 2, backgroundColor: '#5B9BD5', borderRadius: 1, marginLeft: -30, zIndex: 10 },
-    header: { paddingHorizontal: 24, paddingTop: 56, paddingBottom: 16 },
+    header: { paddingHorizontal: 24, paddingTop: SAFE_TOP, paddingBottom: 16 },
     title: { fontSize: 28, fontWeight: '700', color: c.text, letterSpacing: 1 },
     sub: { fontSize: 14, color: c.muted, marginTop: 4 },
     warning: { marginTop: 10, backgroundColor: dark ? '#1A2430' : '#E8F0F8', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, alignSelf: 'flex-start', borderWidth: 1, borderColor: '#5B9BD5' },
     warningText: { color: '#5B9BD5', fontSize: 12, fontWeight: '600' },
-    actions: { flexDirection: 'row', paddingHorizontal: 24, gap: 12, marginBottom: 24 },
+    actions: { flexDirection: 'row', paddingHorizontal: 24, gap: 12, marginBottom: SAFE_BOTTOM },
     btnPrimary: { flex: 1, backgroundColor: '#5B9BD5', borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
     btnPrimaryText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
     btnSecondary: { flex: 1, backgroundColor: dark ? '#1A2430' : '#E8F0F8', borderRadius: 14, paddingVertical: 16, alignItems: 'center', borderWidth: 1, borderColor: '#5B9BD5' },

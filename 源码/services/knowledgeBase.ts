@@ -249,6 +249,7 @@ export async function saveKnowledgeBase(kb: KnowledgeBase): Promise<void> {
 /**
  * 加载知识库（兼容旧 index.json 格式，优先按需加载）
  */
+console.log('[KB] loadKnowledgeBase called');
 export async function loadKnowledgeBase(worldId: string): Promise<KnowledgeBase | null> {
   const dir = getNovelDir(worldId) + 'knowledge/';
   try {

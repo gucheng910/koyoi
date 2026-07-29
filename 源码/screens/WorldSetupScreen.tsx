@@ -18,6 +18,7 @@ import {
 import type { Character, World, WorldNpc, WorldSession } from '../types';
 import Toast from '../components/Toast';
 import { useWorldStore } from '../store/worldStore';
+import { SAFE_TOP } from '../theme/safeArea';
 
 
 interface Props { isDark: boolean; onStart: (session: WorldSession) => void; onBack: () => void; }
@@ -30,7 +31,7 @@ function getAvailableWorlds(): World[] {
 }
 
 export default function WorldSetupScreen({ isDark, onStart, onBack }: Props) {
-  const [step, setStep] = useState<'select' | 'build' | 'ready'>('select');
+      const [step, setStep] = useState<'select' | 'build' | 'ready'>('select');
   const [toast, setToast] = useState<{msg:string;type:'success'|'error'}>({msg:'',type:'success'});
   const [selectedWorld, setSelectedWorld] = useState<World>(getAvailableWorlds()[0]);
   const [selectedChars, setSelectedChars] = useState<Character[]>([]);
@@ -40,7 +41,7 @@ export default function WorldSetupScreen({ isDark, onStart, onBack }: Props) {
   const [customRule, setCustomRule] = useState('');
   const [building, setBuilding] = useState(false);
   const [worldsLoaded, setWorldsLoaded] = useState(false);
-  const S = styles(isDark);
+  const S = styles(isDark, SAFE_TOP);
 
   useEffect(() => { useWorldStore.getState().load().then(() => setWorldsLoaded(true)); }, []);
   useEffect(() => {
@@ -198,10 +199,11 @@ export default function WorldSetupScreen({ isDark, onStart, onBack }: Props) {
   );
 }
 
-function styles(dark: boolean) {
+function styles(dark: boolean, safeTop?: number) {
+  const top = safeTop ?? 48;
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: dark ? '#0D0C0A' : '#FAF8F5' },
-    header: { paddingHorizontal: 20, paddingTop: 60, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: dark ? '#1A1814' : '#ddd' },
+    header: { paddingHorizontal: 20, paddingTop: top, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: dark ? '#1A1814' : '#ddd' },
     backBtn: { color: '#5B9BD5', fontSize: 15, marginBottom: 12 },
     title: { fontSize: 26, fontWeight: '700', color: dark ? '#E8F0F8' : '#1A1814' },
     sub: { fontSize: 13, color: dark ? '#888' : '#888', marginTop: 4 },

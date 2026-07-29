@@ -97,7 +97,6 @@ export interface Appearance {
   skinTone: string;
   hairStyle: string;
   facialFeatures: string;
-  intimateDetails: string;  // 私密外观
 }
 
 export interface Personality {
@@ -107,23 +106,14 @@ export interface Personality {
   habits: string[];
   likes: string[];
   dislikes: string[];
-}
-
-export interface SexualProfile {
-  libido: number;           // 1-10
-  experience: number;       // 1-10
-  dominance: number;        // 0=完全被动, 5=对等, 10=完全主动
-  kinks: string[];
-  softLimits: string[];
-  hardLimits: string[];
-  sensitiveZones: string[];
-  sexualResponse: string;
+  behaviorProfile?: CharacterBehaviorProfile;
+  promptOverride?: string;
+  _deepProfile?: string;
 }
 
 export interface Relationship {
   intimacy: number;         // 0-100
   trust: number;            // 0-100
-  submission: number;       // 0-100
   arousal: number;          // 0-100
   status: string;           // 关系状态描述
 }
@@ -174,7 +164,6 @@ export interface Character {
   age: string;
   appearance: Appearance;
   personality: Personality;
-  sexualProfile: SexualProfile;
   relationship: Relationship;
   backstory: string;
   worldContext: WorldContext;
@@ -405,6 +394,48 @@ export interface AutonomyResult {
   worldEvent?: string;
 }
 
+// ---- 角色行为画像 ----
+
+export interface CharacterBehaviorProfile {
+  priorityHierarchy?: string;
+  pressurePoints: string[];
+  breakingPoint?: string;
+  relationshipPatterns?: string;
+  activeConflict?: string;
+  resolutionTendency?: string;
+  behavioralSummary: string;
+}
+
+// ---- 情绪与知识系统 ----
+
+export interface CharacterMoodState {
+  emotion: string;
+  intensity: number;       // 1-10
+  cause?: string;
+  sinceRound: number;
+  expressed: boolean;
+}
+
+export interface CharacterKnowledge {
+  knownFacts: Array<{
+    fact: string;
+    certainty: number;     // 0-1
+    source?: string;       // 信息来源
+    learnedAt?: number;    // 得知时的轮次
+  }>;
+}
+
+export interface NotableEvent {
+  id: string;
+  round: number;
+  type: 'public_action' | 'relationship_shift' | 'scene_change' | 'private_action';
+  description: string;
+  involvedChars: string[];
+  witnessChars: string[];
+  visibility: 'public' | 'witness_only';
+  impact: number;
+}
+
 // ---- 大世界会话 ----
 
 export interface WorldNpc {
@@ -452,6 +483,10 @@ export interface WorldSession {
   currentChapter?: number;       // 当前所处章节（0-based），同人模式用
   worldNovelId?: string;         // 关联的 NovelStorage worldId，同人模式用
   timelinePosition?: TimelinePosition;
+  worldClock?: number;
+  characterMoods?: Record<string, CharacterMoodState>;
+  notableEvents?: string[];
+  characterKnowledge?: Record<string, CharacterKnowledge>;
 }
 
 export interface UserPersona {

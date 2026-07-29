@@ -259,13 +259,16 @@ export async function simulateCharacters(
   events: string,
   activeList: string,
   prevStates?: Record<string,{intent:string;mood:string}>,
-  kbContexts?: Record<string, string>
+  kbContexts?: Record<string, string>,
+  behaviorProfiles?: Record<string, string>
 ): Promise<{ actions: CharacterAction[]; interactionChanges: Array<{ action: string; character_name: string; narrative: string }> }> {
   const results = await Promise.all(characters.map(char => {
     const prev = prevStates?.[char.name];
     const prevStr = prev ? `意图:${prev.intent}, 情绪:${prev.mood}` : undefined;
     const kbCtx = kbContexts?.[char.name];
-    return simulateCharacter(config, char, scene, events, char.relationship, char.interactionState, activeList, prevStr, kbCtx);
+    const bpText = behaviorProfiles?.[char.name];
+    const mergedKb = [kbCtx, bpText].filter(Boolean).join('\n');
+    return simulateCharacter(config, char, scene, events, char.relationship, char.interactionState, activeList, prevStr, mergedKb || undefined);
   }));
   const actions: CharacterAction[] = [];
   const changes: Array<{ action: string; character_name: string; narrative: string }> = [];

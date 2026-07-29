@@ -53,6 +53,7 @@ export function updateMoods(
   currentMoods: Record<string, CharacterMoodState>,
   turnCount: number
 ): Record<string, CharacterMoodState> {
+  console.log('[MOOD] updateMoods actions=' + actions.length + ' existing=' + Object.keys(currentMoods).length);
   const moods = { ...currentMoods };
 
   for (const action of actions) {
@@ -103,6 +104,7 @@ export function decayMoods(
   moods: Record<string, CharacterMoodState>,
   currentRound: number
 ): Record<string, CharacterMoodState> {
+  console.log('[MOOD] decayMoods chars=' + Object.keys(moods).length + ' round=' + currentRound);
   const result: Record<string, CharacterMoodState> = {};
 
   for (const [name, mood] of Object.entries(moods)) {

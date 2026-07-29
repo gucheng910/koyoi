@@ -10,16 +10,18 @@ import {
 import { useCharacterStore } from '../store/characterStore';
 import { useWorldStore } from '../store/worldStore';
 import type { Character, WorldType, World } from '../types';
+import { SAFE_TOP } from '../theme/safeArea';
 
 interface Props {
   isDark: boolean;
   onCreated?: () => void;
 }
 
-function S(dark: boolean) {
+function S(dark: boolean, safeTop?: number) {
+  const top = safeTop ?? 48;
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: dark ? '#0D0C0A' : '#FAF8F5' },
-    header: { paddingHorizontal: 20, paddingTop: 60, paddingBottom: 8 },
+    header: { paddingHorizontal: 20, paddingTop: top, paddingBottom: 8 },
     title: { fontSize: 26, fontWeight: '700', color: dark ? '#E8DCC8' : '#1A1814' },
     sub: { fontSize: 13, color: dark ? '#8A8070' : '#8A8070', marginTop: 4, marginBottom: 20 },
     tabBtn: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 16, backgroundColor: dark ? '#252525' : '#E8F0F8' },
@@ -71,6 +73,8 @@ function S(dark: boolean) {
   });
 }
 
+const TRAITS_POOL = ['傲娇', '温柔', '冷酷', '热情', '腹黑', '纯真', '成熟', '活泼', '忧郁', '强势', '柔弱', '毒舌', '天然呆', '忠犬', '女王', '病娇', '小恶魔'];
+
 const WORLDS: { key: WorldType; label: string }[] = [
   { key: 'modern', label: '现代都市' },
   { key: 'cultivation', label: '修仙' },
@@ -81,12 +85,10 @@ const WORLDS: { key: WorldType; label: string }[] = [
   { key: 'custom', label: '自定义' },
 ];
 
-const TRAITS_POOL = ['傲娇', '温柔', '冷酷', '热情', '腹黑', '纯真', '成熟', '活泼', '忧郁', '强势', '柔弱', '毒舌', '天然呆', '痴女', '禁欲', '放荡', '忠犬', '女王', '病娇', '小恶魔'];
 
-const KINKS_POOL = ['温柔', '霸道', '占有', '服从', '禁欲', '放纵', '支配', '被支配', '角色扮演', '束缚', '言语刺激', '若即若离', '膝枕', '亲密接触', '默默守护', '若隐若现', '强势', '依恋', '试探', '对比'];
 
 export default function CreateScreen({ isDark, onCreated }: Props) {
-  const st = S(isDark);
+      const st = S(isDark, SAFE_TOP);
   const { addCharacter } = useCharacterStore();
   const [mode, setMode] = useState<'character' | 'world'>('character');
 
@@ -95,7 +97,6 @@ export default function CreateScreen({ isDark, onCreated }: Props) {
   const [worldTypeCreate, setWorldTypeCreate] = useState<WorldType>('modern');
   const [worldSupernatural, setWorldSupernatural] = useState('');
   const [worldSociety, setWorldSociety] = useState('');
-  const [worldSexualNorms, setWorldSexualNorms] = useState('');
 
   // 角色创建 state
   const [name, setName] = useState('');
@@ -105,19 +106,13 @@ export default function CreateScreen({ isDark, onCreated }: Props) {
   const [gender, setGender] = useState<'female' | 'male'>('female');
   const [height, setHeight] = useState('');
   const [bodyType, setBodyType] = useState('');
-  const [bust, setBust] = useState('');
   const [appearance, setAppearance] = useState('');
-  const [intimateDetails, setIntimateDetails] = useState('');
   const [traits, setTraits] = useState<string[]>([]);
   const [speaking, setSpeaking] = useState('');
   const [likes, setLikes] = useState('');
   const [dislikes, setDislikes] = useState('');
-  const [libido, setLibido] = useState(5);
   const [experience, setExperience] = useState(3);
   const [dominance, setDominance] = useState(3);
-  const [kinks, setKinks] = useState<string[]>([]);
-  const [softLimits, setSoftLimits] = useState('');
-  const [hardLimits, setHardLimits] = useState('');
   const [zones, setZones] = useState('');
   const [response, setResponse] = useState('');
   const [backstory, setBackstory] = useState('');
@@ -127,10 +122,6 @@ export default function CreateScreen({ isDark, onCreated }: Props) {
 
   const toggleTrait = (t: string) => {
     setTraits(prev => prev.includes(t) ? prev.filter(x => x !== t) : prev.length < 5 ? [...prev, t] : prev);
-  };
-
-  const toggleKink = (k: string) => {
-    setKinks(prev => prev.includes(k) ? prev.filter(x => x !== k) : [...prev, k]);
   };
 
   const slider = (val: number, set: (v: number) => void) => (
@@ -151,24 +142,14 @@ export default function CreateScreen({ isDark, onCreated }: Props) {
       gender, age: age || '未知',
       appearance: {
         height: height || '未设定', bodyType: bodyType || '未设定',
-        bust: bust || '未设定', waist: '未设定', hips: '未设定',
         skinTone: '未设定', hairStyle: '未设定', facialFeatures: appearance || '未设定',
-        intimateDetails: intimateDetails || '未设定',
       },
       personality: {
         traits: traits.length ? traits : ['神秘'],
         speakingStyle: speaking || '未设定', habits: [], likes: likes ? likes.split(',') : [],
         dislikes: dislikes ? dislikes.split(',') : [],
       },
-      sexualProfile: {
-        libido, experience, dominance,
-        kinks: kinks.length ? kinks : ['待探索'],
-        softLimits: softLimits ? softLimits.split(',') : [],
-        hardLimits: hardLimits ? hardLimits.split(',') : [],
-        sensitiveZones: zones ? zones.split(',') : [],
-        sexualResponse: response || '未设定',
-      },
-      relationship: { intimacy: 0, trust: 0, submission: 0, arousal: 0, status: '初次见面' },
+      relationship: { intimacy: 0, trust: 0, status: '初次见面' },
       backstory: backstory || '未设定',
       worldContext: buildWorldContext(worldType),
       autonomy: { goals: [], schedule: '', agency: 5 },
@@ -238,9 +219,7 @@ export default function CreateScreen({ isDark, onCreated }: Props) {
         <Text style={[st.label, { paddingHorizontal: 20 }]}>外貌</Text>
         <View style={st.section}>
           <TextInput style={st.input} placeholder="体型描述" placeholderTextColor="#666" value={bodyType} onChangeText={setBodyType} />
-          <TextInput style={st.input} placeholder="胸围/胸部描述" placeholderTextColor="#666" value={bust} onChangeText={setBust} />
           <TextInput style={st.input} placeholder="五官/面容" placeholderTextColor="#666" value={appearance} onChangeText={setAppearance} />
-          <TextInput style={[st.input, st.inputMulti]} placeholder="私密部位描述（色情游戏的灵魂）" placeholderTextColor="#666" value={intimateDetails} onChangeText={setIntimateDetails} multiline />
         </View>
 
         <View style={st.divider} />
@@ -260,41 +239,6 @@ export default function CreateScreen({ isDark, onCreated }: Props) {
           <TextInput style={st.input} placeholder="说话风格（例：语气冷淡但身体诚实...）" placeholderTextColor="#666" value={speaking} onChangeText={setSpeaking} />
           <TextInput style={st.input} placeholder="喜欢的事物（用逗号分隔）" placeholderTextColor="#666" value={likes} onChangeText={setLikes} />
           <TextInput style={st.input} placeholder="讨厌的事物" placeholderTextColor="#666" value={dislikes} onChangeText={setDislikes} />
-        </View>
-
-        <View style={st.divider} />
-
-        {/* 偏好设定 */}
-        <Text style={[st.label, { paddingHorizontal: 20 }]}>偏好设定</Text>
-        <View style={st.section}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-around', marginBottom: 16 }}>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontSize: 13, color: '#8A8070', marginBottom: 6 }}>欲望</Text>
-              {slider(libido, setLibido)}
-            </View>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontSize: 13, color: '#8A8070', marginBottom: 6 }}>经验</Text>
-              {slider(experience, setExperience)}
-            </View>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontSize: 13, color: '#8A8070', marginBottom: 6 }}>主导</Text>
-              {slider(dominance, setDominance)}
-            </View>
-          </View>
-
-          <Text style={[st.label, { fontSize: 13, marginTop: 8 }]}>偏好标签</Text>
-          <View style={st.row}>
-            {KINKS_POOL.map(k => (
-              <TouchableOpacity key={k} style={[st.tag, kinks.includes(k) && st.tagActive]} onPress={() => toggleKink(k)}>
-                <Text style={[st.tagText, kinks.includes(k) && st.tagTextActive]}>{k}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          <TextInput style={st.input} placeholder="软限制（可以尝试但需引导）" placeholderTextColor="#666" value={softLimits} onChangeText={setSoftLimits} />
-          <TextInput style={st.input} placeholder="硬限制（绝对不行）" placeholderTextColor="#666" value={hardLimits} onChangeText={setHardLimits} />
-          <TextInput style={st.input} placeholder="敏感带（逗号分隔）" placeholderTextColor="#666" value={zones} onChangeText={setZones} />
-          <TextInput style={[st.input, st.inputMulti]} placeholder="反应模式" placeholderTextColor="#666" value={response} onChangeText={setResponse} multiline />
         </View>
 
         <View style={st.divider} />
@@ -329,7 +273,6 @@ export default function CreateScreen({ isDark, onCreated }: Props) {
           </View>
           <TextInput style={[st.input, st.inputMulti]} placeholder="力量/超自然体系" placeholderTextColor="#666" value={worldSupernatural} onChangeText={setWorldSupernatural} multiline />
           <TextInput style={[st.input, st.inputMulti]} placeholder="社会结构/权力分布" placeholderTextColor="#666" value={worldSociety} onChangeText={setWorldSociety} multiline />
-          <TextInput style={[st.input, st.inputMulti]} placeholder="性观念/性别关系" placeholderTextColor="#666" value={worldSexualNorms} onChangeText={setWorldSexualNorms} multiline />
         </View>
 
         <TouchableOpacity style={st.createBtn} onPress={async () => {
@@ -338,12 +281,10 @@ export default function CreateScreen({ isDark, onCreated }: Props) {
             id: 'custom_world_' + Date.now(),
             name: worldName.trim(),
             type: worldTypeCreate,
-            rules: { physics: '', supernatural: worldSupernatural, technology: '', society: worldSociety, morality: '', sexualNorms: worldSexualNorms },
             locations: [], factions: [], timeline: [], inertia: { majorEvents: 0.5, characterFate: 0.5, worldReaction: 0.5 },
             butterflySensitivity: { minor: '', major: '' },
           };
           await useWorldStore.getState().addWorld(world);
-          setWorldName(''); setWorldSupernatural(''); setWorldSociety(''); setWorldSexualNorms('');
           setErrorMsg('');
           onCreated?.();
         }}>

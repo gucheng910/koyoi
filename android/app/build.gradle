@@ -93,7 +93,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "2.16.0"
+        versionName "2.18.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -127,12 +127,11 @@ android {
             useLegacyPackaging enableLegacyPackaging.toBoolean()
         }
     }
-    // 按 ABI 拆分 APK，分别适配不同架构
     splits {
         abi {
             enable true
             reset()
-            include "arm64-v8a", "armeabi-v7a"
+            include 'arm64-v8a', 'x86_64'
             universalApk false
         }
     }

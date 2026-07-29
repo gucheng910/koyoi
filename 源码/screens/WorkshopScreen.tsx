@@ -4,6 +4,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import type { Character, WorldType } from '../types';
+import { SAFE_TOP } from '../theme/safeArea';
 
 interface Props { character: Character; isDark: boolean; onStart: (c: Character) => void; onBack: () => void; }
 
@@ -23,7 +24,7 @@ export default function WorkshopScreen({ character, isDark, onStart, onBack }: P
   const [outfit, setOutfit] = useState(character.currentContext.outfit);
   const [specialRule, setSpecialRule] = useState('');
 
-  const S = styles(isDark);
+  const S = styles(isDark, SAFE_TOP);
 
   const applyTemplate = (tpl: typeof SCENE_TEMPLATES[0]) => {
     setLoc(tpl.location); setTime(tpl.time); setMood(tpl.mood);
@@ -81,10 +82,11 @@ export default function WorkshopScreen({ character, isDark, onStart, onBack }: P
   );
 }
 
-function styles(dark: boolean) {
+function styles(dark: boolean, safeTop?: number) {
+  const SAFE_TOP = safeTop ?? 56;
   return StyleSheet.create({
     container: { flex: 1, backgroundColor: dark ? '#0d0d0d' : '#fafafa' },
-    header: { paddingHorizontal: 20, paddingTop: 60, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: dark ? '#1a1a1a' : '#e8e8e8' },
+    header: { paddingHorizontal: 20, paddingTop: SAFE_TOP, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: dark ? '#1a1a1a' : '#e8e8e8' },
     backBtn: { color: '#e91e63', fontSize: 15, marginBottom: 12 },
     title: { fontSize: 26, fontWeight: '700', color: dark ? '#f5f5f5' : '#1a1a1a' },
     sub: { fontSize: 13, color: dark ? '#888' : '#999', marginTop: 4 },

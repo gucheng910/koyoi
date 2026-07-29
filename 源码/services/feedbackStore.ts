@@ -9,6 +9,7 @@
 //    4. 识别高频差评模式 → 自动调整 prompt 权重
 // ============================================================
 
+// @ts-expect-error Metro bundler handles ESM/CommonJS interop
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ChatMessage } from '../types';
 

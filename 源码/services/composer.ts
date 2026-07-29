@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 //  提示词拼接引擎 (Composer)
 //  职责：将世界规则、角色卡、记忆、玩法规则拼接成
 //  每次 API 请求的 messages 数组
@@ -117,15 +117,6 @@ function characterToPrompt(c: Character): string {
   parts.push(`Dislikes: ${c.personality.dislikes.join(', ')}`);
 
   // 性偏好
-  parts.push(`\nSexual Profile:`);
-  parts.push(`Libido: ${c.sexualProfile.libido}/10`);
-  parts.push(`Experience: ${c.sexualProfile.experience}/10`);
-  parts.push(`Dominance: ${c.sexualProfile.dominance}/10 (0=completely submissive, 10=completely dominant)`);
-  parts.push(`Kinks/Fetishes: ${c.sexualProfile.kinks.join(', ')}`);
-  parts.push(`Soft Limits: ${c.sexualProfile.softLimits.join(', ')}`);
-  parts.push(`Hard Limits (NEVER BREACH): ${c.sexualProfile.hardLimits.join(', ')}`);
-  parts.push(`Sensitive Zones: ${c.sexualProfile.sensitiveZones.join(', ')}`);
-  parts.push(`Sexual Response Pattern: ${c.sexualProfile.sexualResponse}`);
 
   // 背景
   if (c.backstory) {
@@ -190,7 +181,6 @@ function worldToPrompt(w: World): string {
   lines.push(`Technology Level: ${w.rules?.technology || ""}`);
   lines.push(`Social Structure: ${w.rules?.society || ""}`);
   lines.push(`Moral Framework: ${w.rules?.morality || ""}`);
-  lines.push(`Sexual Norms: ${w.rules?.sexualNorms || ""}`);
 
   if (w.locations.length > 0) {
     lines.push(`\nImportant Locations:`);
@@ -227,7 +217,6 @@ function relationshipToPrompt(r: Character['relationship']): string {
 
 function contextToPrompt(ctx: Character['currentContext']): string {
   return [
-    `Current Location: ${ctx.location} (evaluate appropriateness of sexual activity here)`,
     `Time: ${ctx.timeOfDay}`,
     `Character's Outfit: ${ctx.outfit}`,
     `Character's Current Mood: ${ctx.mood}`,
@@ -410,7 +399,6 @@ export function composeMemoryExtractPrompt(
         ``,
         `Extract events of these types:`,
         `- milestone: significant relationship developments`,
-        `- discovery: new information about preferences, sensitive zones, fears`,
         `- boundary: expressions of limits or consent`,
         `- event: notable occurrences that affect the story`,
         ``,

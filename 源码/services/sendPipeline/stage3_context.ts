@@ -18,6 +18,7 @@ export async function buildContext(
   messages: ChatMessage[],
   turnCount: number
 ): Promise<ContextResult> {
+  console.log('[PIPELINE] stage3 buildContext start turn=' + turnCount);
   const worldInfo = getWorldInfoFn(session, finalText, messages);
 
   let chapterCtx: any = null;

@@ -2,7 +2,7 @@
 //  发送管线 — 阶段 1: 输入处理
 // ============================================================
 
-import type { ChatMessage } from '../types';
+import type { ChatMessage } from '../../types';
 
 export interface InputResult {
   finalText: string;
@@ -14,6 +14,7 @@ export function processInput(
   segments: { text: string; tag: string }[],
   messages: ChatMessage[]
 ): InputResult {
+  console.log('[PIPELINE] stage1 processInput segments=' + segments.length + ' msgs=' + messages.length);
   const finalText = segments.map(s => '[' + (s.tag === 'speech' ? '说' : '行动') + '] ' + s.text).join('\n');
   const userMsg: ChatMessage = { role: 'user', content: finalText, timestamp: new Date().toISOString() };
   return { finalText, userMsg, msgsWithUser: [...messages, userMsg] };

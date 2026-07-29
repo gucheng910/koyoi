@@ -22,6 +22,7 @@ import WorldSetupScreen from './源码/screens/WorldSetupScreen';
 import WorldChatScreen from './源码/screens/WorldChatScreen';
 import WorldErrorBoundary from './源码/components/WorldErrorBoundary';
 import SplashScreen from './源码/components/SplashScreen';
+import { SAFE_BOTTOM } from './源码/theme/safeArea';
 import FanficScreen from './源码/screens/FanficScreen';
 import ErrorBoundary from './源码/components/ErrorBoundary';
 import { AnimatedAlertProvider } from './源码/components/AnimatedAlert';
@@ -35,10 +36,10 @@ const WORLDS_KEY = '@koyoi_world_sessions';
 export default function App() {
   return (
     <ThemeProvider>
-      <AnimatedAlertProvider>
-        <AppContent />
-      </AnimatedAlertProvider>
-    </ThemeProvider>
+        <AnimatedAlertProvider>
+          <AppContent />
+        </AnimatedAlertProvider>
+      </ThemeProvider>
   );
 }
 
@@ -71,10 +72,15 @@ function AppContent() {
 
   useEffect(() => {
     // 并行加载所有存储，减少冷启动等待
-    Promise.all([
-      loadConfigs(),
-      useCharacterStore.getState().loadCharacters(),
-      usePersonaStore.getState().load(),
+    // 加 8 秒全局超时，防止某个存储挂起导致白屏
+    const timeout = new Promise<void>(resolve => setTimeout(() => resolve(), 8000));
+    Promise.race([
+      Promise.all([
+        loadConfigs(),
+        useCharacterStore.getState().loadCharacters(),
+        usePersonaStore.getState().load(),
+      ]),
+      timeout,
     ]).catch(() => {});
     // 后台时强制保存用量
     const sub = AppState.addEventListener('change', (state) => {
@@ -324,7 +330,7 @@ function theme(dark: boolean) {
       flexDirection: 'row', borderTopWidth: 1,
       borderTopColor: dark ? '#1a1a1a' : '#e8e8e8',
       backgroundColor: dark ? '#0d0d0d' : '#fafafa',
-      paddingBottom: 20, paddingTop: 8,
+      paddingBottom: SAFE_BOTTOM + 8, paddingTop: 8,
     },
     tab: { flex: 1, alignItems: 'center', paddingVertical: 4 },
     tabIcon: { fontSize: 18, color: dark ? '#555' : '#bbb', marginBottom: 2 },

@@ -144,7 +144,7 @@ export function cardToCharacter(card: ImportedCard, worldId?: string): Character
       likes: [],
       dislikes: [],
     },
-    sexualProfile: { libido: 5, experience: 3, dominance: 5, kinks: [], softLimits: [], hardLimits: [], sensitiveZones: [], sexualResponse: '' },
+    
     relationship: { intimacy: 0, trust: 0, submission: 0, arousal: 0, status: '' },
     backstory: card.description || '',
     worldContext: { type: 'custom', sourceNovel: '', originalRole: '', originalFate: '' },
@@ -173,7 +173,6 @@ export function cardToWorld(card: ImportedCard, worldId?: string): World {
       technology: '',
       society: '',
       morality: '',
-      sexualNorms: '',
     },
     locations: [],
     factions: [],

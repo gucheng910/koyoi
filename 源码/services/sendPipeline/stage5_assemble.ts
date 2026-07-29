@@ -15,6 +15,7 @@ import { moodsToPrompt } from '../emotionalInertia';
 import { knowledgeToPrompt } from '../rumorPropagation';
 import { OOC_RULES } from '../../prompts/tokens';
 import { FORMAT_RULES } from '../../prompts/tokens';
+import { directorToPrompt } from '../narrativeDirector';
 import type { WorldSession, ChatMessage, Character } from '../../types';
 import type { CharacterAction } from '../characterSimulator';
 import type { ApiConfig } from '../../types';
@@ -38,6 +39,7 @@ export async function assemblePrompt(
   summaryRef: React.MutableRefObject<string>,
   attitudes: React.MutableRefObject<Record<string, any>>
 ): Promise<PromptResult> {
+  console.log('[PIPELINE] stage5 assemble start promptMsgs=' + msgsWithUser.length);
   const fanficAppend = isFanfic ? NARRATOR_FANFIC_APPEND : '';
   const chapterPrompt = (isFanfic && chapterCtx) ? contextToPrompt(chapterCtx) : '';
 
@@ -196,6 +198,13 @@ export async function assemblePrompt(
 
   if ((session.world as any)?.styleSamples?.length > 0) {
     dynamicParts.push('\n风格参考：' + (session.world as any).styleSamples.slice(0, 2).map((s: string) => '「' + s + '」').join('\n'));
+  }
+
+  // 叙事导演指示
+  const dir = (session as any).directorDecision;
+  if (dir) {
+    const dirText = directorToPrompt(dir);
+    if (dirText) dynamicParts.push(dirText);
   }
 
   dynamicParts.push('\n【角色引入】需要引入原著新角色时，在回复末尾添加 ___META___ {"newCharacter":"角色名"}');

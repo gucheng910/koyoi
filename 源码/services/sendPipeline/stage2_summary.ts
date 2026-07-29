@@ -13,6 +13,7 @@ export function maybeGenerateSummary(
   summaryRef: React.MutableRefObject<string>,
   cfg: ApiConfig
 ): void {
+  console.log('[PIPELINE] stage2 maybeGenerateSummary turn=' + turnCount + ' msgs=' + messages.length);
   if (messages.length <= 30 || summaryRef.current || turnCount % 10 !== 0) return;
   const oldMsgs = messages.slice(0, messages.length - 30);
   if (oldMsgs.length <= 10) return;

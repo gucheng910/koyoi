@@ -8,7 +8,7 @@
 // ============================================================
 
 import { chatCompletionSync } from '../api/deepseek';
-import type { WorldSession, Character } from '../types';
+import type { WorldSession, Character, ApiConfig } from '../types';
 
 export interface BackgroundInteraction {
   /** 互动的两个角色 */
@@ -29,8 +29,9 @@ export interface BackgroundInteraction {
  * OpenCharacterBook 的 Seed Resolution 模式：
  * 不随机选角色，而是根据已有关系/同场景/共同目标来筛选
  */
+console.log('[BG] generateBackgroundInteraction called');
 export async function generateBackgroundInteraction(
-  cfg: { apiKey: string; baseUrl: string },
+  cfg: Pick<ApiConfig, 'apiKey' | 'baseUrl' | 'model'>,
   activeChars: Array<{ name: string; personality: string; status: string; relationship: string }>,
   scene: string
 ): Promise<BackgroundInteraction | null> {
@@ -107,7 +108,7 @@ export async function generateBackgroundInteraction(
     ];
 
     const raw = await chatCompletionSync(
-      { ...cfg, model: cfg.model || 'deepseek-v4-flash', thinkingMode: 'disabled', maxTokens: 200, temperature: 0.7, safetyFilter: 'off', streamOutput: false, showSystemPrompt: false, autoPolish: false, isDefault: false },
+      { ...cfg, id: '', label: '', reasoningEffort: 'high' as const, thinkingMode: 'disabled', maxTokens: 200, temperature: 0.7, safetyFilter: 'off', streamOutput: false, showSystemPrompt: false, autoPolish: false, isDefault: false },
       prompt,
       { maxTokens: 200, temperature: 0.7 }
     );

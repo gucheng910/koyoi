@@ -23,12 +23,14 @@ import { enhanceWithScenario } from '../services/scenarioInjector';
 import { generateBackgroundInteraction, applyBackgroundInteraction } from '../services/backgroundInteraction';
 import { WORLD_RULES, NARRATOR_BASE, NARRATOR_FANFIC_APPEND, VOCAB_LOCK, POST_HISTORY_BASE } from '../prompts/worldRules';
 import { processInput, maybeGenerateSummary, buildContext, runCharacterSimulation, assemblePrompt, callAI, postProcessResponse, runPostSendHooks } from '../services/sendPipeline';
+import { recordFeedback as rf } from '../services/feedbackStore';
+import { SAFE_TOP, SAFE_BOTTOM } from '../theme/safeArea';
 
 interface Props { session: WorldSession; onBack: () => void; isDark: boolean; }
 
 const T = (dark: boolean) => StyleSheet.create({
   container: { flex: 1, backgroundColor: dark ? '#0D0C0A' : '#FAF8F5' },
-  topBar: { flexDirection: 'row', alignItems: 'center', paddingTop: 50, paddingBottom: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: dark ? '#2A2822' : '#E8E4DD' },
+  topBarBase: { flexDirection: 'row', alignItems: 'center', paddingBottom: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: dark ? '#2A2822' : '#E8E4DD' },
   backBtn: { color: '#5B9BD5', fontSize: 15, paddingRight: 12 },
   topName: { fontSize: 16, fontWeight: '700', color: dark ? '#E8DCC8' : '#2D2822' },
   topStatus: { fontSize: 10, color: dark ? '#8A8070' : '#8A8070', marginTop: 2 },
@@ -38,7 +40,7 @@ const T = (dark: boolean) => StyleSheet.create({
   speakerName: { fontSize: 11, fontWeight: '600', marginBottom: 4, color: '#5B9BD5' },
   msgText: { fontSize: 15, color: dark ? '#E8DCC8' : '#2D2822', lineHeight: 24 },
   userMsgText: { color: '#FFFFFF' },
-  inputBar: { flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: dark ? '#2A2822' : '#E8E4DD', alignItems: 'flex-end' },
+  inputBar: { flexDirection: 'row', paddingHorizontal: 12, paddingBottom: SAFE_BOTTOM, borderTopWidth: 1, borderTopColor: dark ? '#2A2822' : '#E8E4DD', alignItems: 'flex-end' },
   textInput: { flex: 1, backgroundColor: dark ? '#1A1814' : '#FFFFFF', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 12, color: dark ? '#E8DCC8' : '#2D2822', fontSize: 15, maxHeight: 120, borderWidth: 1, borderColor: dark ? '#2A2822' : '#E8E4DD' },
   sendBtn: { backgroundColor: '#5B9BD5', borderRadius: 20, paddingHorizontal: 20, paddingVertical: 12, marginLeft: 8 },
   sendBtnOff: { backgroundColor: dark ? '#333' : '#ddd' },
@@ -79,7 +81,7 @@ function normalizeSession(s: any) {
 }
 
 export default function WorldChatScreen({ session: initialSession, onBack, isDark }: Props) {
-  const st = T(isDark);
+      const st = T(isDark);
   const [session, setSession] = useState(initialSession);
   const [messages, setMessages] = useState<ChatMessage[]>(initialSession.messages);
   const [inputText, setInputText] = useState('');
@@ -115,7 +117,6 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
   const displayMsgs = [...messages, ...(isGenerating && streamingText ? [{ role: 'assistant' as const, content: streamingText, timestamp: '', isStreaming: true } as any] : [])];
 
   const recordFeedback = (rating: 1 | 0, msg: ChatMessage, userMsg: ChatMessage | undefined, s: WorldSession) => {
-    const { recordFeedback: rf } = require('../services/feedbackStore');
     rf({
       worldId: s.id, worldName: s.world?.name || '',
       turnNumber: turnCount.current,
@@ -242,7 +243,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
         smartScroll();
 
         // 阶段 8: 后处理钩子
-        runPostSendHooks({ session: sessionRef.current, updated, turnCount, saveSession, setSession, activeChars, lastSimResults });
+        runPostSendHooks({ session: sessionRef.current, updated, turnCount, saveSession, setSession, activeChars, lastSimResults, charActions, userMsg });
       }
     } catch (e: any) {
       const msg = e.message || String(e);
@@ -317,7 +318,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
   return (
     <FadeIn style={{ flex: 1 }}>
     <KeyboardAvoidingView style={st.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
-      <View style={st.topBar}>
+      <View style={[st.topBarBase, { paddingTop: SAFE_TOP }]}>
         <TouchableOpacity onPress={() => { if (isGenerating) showAlert('退出','对话生成中，确定退出？',[{text:'取消'},{text:'退出',style:'destructive',onPress: async () => { try { await saveSession(); } catch {} finally { onBack(); } }}]); else { saveSession().then(() => onBack()).catch(() => onBack()); } }}><Text style={st.backBtn}>← 返回</Text></TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={st.topName}>{session.world?.name || '世界'}</Text>

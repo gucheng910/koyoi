@@ -5,14 +5,16 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
-  StyleSheet, Switch, ActivityIndicator, Linking, Image,
+  StyleSheet, Switch, ActivityIndicator, Linking, Image, Platform,
 } from 'react-native';
+import { REWARD_IMAGE_URI } from '../theme/rewardImage';
 import { useConfigStore } from '../store/configStore';
 import { usePersonaStore } from '../store/personaStore';
 import { useUsageStore } from '../store/usageStore';
 import { getCacheMetrics } from '../api/deepseek';
 import * as SecureStore from 'expo-secure-store';
 import type { ApiConfig } from '../types';
+import { SAFE_TOP } from '../theme/safeArea';
 
 interface Props { isDark: boolean; onToggleTheme: () => void; }
 
@@ -70,7 +72,7 @@ function colors(dark: boolean) {
 // ── 主设置页 ──
 function MainPage({ isDark, onToggleTheme, onNav }: { isDark: boolean; onToggleTheme: () => void; onNav: (p: string) => void }) {
   const c = colors(isDark);
-  const persona = usePersonaStore();
+      const persona = usePersonaStore();
   const s = useUsageStore();
   const u = s?.usage || { today:{inputTokens:0,outputTokens:0,calls:0,inputCostRmb:0,outputCostRmb:0}, total:{inputTokens:0,outputTokens:0,calls:0,inputCostRmb:0,outputCostRmb:0} };
   const [showUsage, setShowUsage] = useState(false);
@@ -80,7 +82,7 @@ function MainPage({ isDark, onToggleTheme, onNav }: { isDark: boolean; onToggleT
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.bg }} showsVerticalScrollIndicator={false}>
-      <Text style={{ fontSize: 32, fontWeight: '800', color: c.text, paddingHorizontal: 20, paddingTop: 60, paddingBottom: 28, letterSpacing: 0.5 }}>设置</Text>
+      <Text style={{ fontSize: 32, fontWeight: '800', color: c.text, paddingHorizontal: 20, paddingTop: SAFE_TOP, paddingBottom: 28, letterSpacing: 0.5 }}>设置</Text>
 
       <Section title="偏好">
         <Row icon="👤" label="玩家性别" value={persona.gender==='male'?'男':'女'} onPress={()=>persona.setGender(persona.gender==='male'?'female':'male')} dark={isDark} last />
@@ -119,7 +121,7 @@ function MainPage({ isDark, onToggleTheme, onNav }: { isDark: boolean; onToggleT
 // ── API 配置页 ──
 function ApiPage({ isDark, onBack }: { isDark: boolean; onBack: () => void }) {
   const c = colors(isDark);
-  const { configs, activeConfigId, isLoaded, loadConfigs, saveConfig, testConnection } = useConfigStore();
+      const { configs, activeConfigId, isLoaded, loadConfigs, saveConfig, testConnection } = useConfigStore();
   const [apiKey, setApiKey] = useState(''); const [baseUrl, setBaseUrl] = useState('https://api.deepseek.com');
   const [model, setModel] = useState('deepseek-v4-flash'); const [thinking, setThinking] = useState<'disabled'|'low'|'high'>('disabled');
   const [effort, setEffort] = useState<'low'|'high'>('high');
@@ -144,7 +146,7 @@ function ApiPage({ isDark, onBack }: { isDark: boolean; onBack: () => void }) {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: c.bg }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-      <TouchableOpacity onPress={onBack} style={{ paddingLeft: 20, paddingTop: 56, paddingBottom: 12 }}><Text style={{ fontSize: 15, color: '#5B9BD5' }}>← 设置</Text></TouchableOpacity>
+      <TouchableOpacity onPress={onBack} style={{ paddingLeft: 20, paddingTop: SAFE_TOP, paddingBottom: 12 }}><Text style={{ fontSize: 15, color: '#5B9BD5' }}>← 设置</Text></TouchableOpacity>
       <Text style={{ fontSize: 32, fontWeight: '800', color: c.text, paddingHorizontal: 20, paddingBottom: 24, letterSpacing: 0.5 }}>API 配置</Text>
 
       <Section title="连接">
@@ -198,11 +200,12 @@ function ApiPage({ isDark, onBack }: { isDark: boolean; onBack: () => void }) {
 // ── 赞赏 & 关于 ──
 function RewardPage({ isDark, onBack }: { isDark: boolean; onBack: () => void }) {
   const c = colors(isDark);
+  const bottomPad = 24;
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
-      <TouchableOpacity onPress={onBack} style={{ paddingLeft: 20, paddingTop: 56, paddingBottom: 12 }}><Text style={{ fontSize: 15, color: '#5B9BD5' }}>← 设置</Text></TouchableOpacity>
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 80 }}>
-        <Image source={require('../../assets/reward.png')} style={{ width: 200, height: 200, borderRadius: 12 }} resizeMode="contain" />
+      <TouchableOpacity onPress={onBack} style={{ paddingLeft: 20, paddingTop: SAFE_TOP, paddingBottom: 12 }}><Text style={{ fontSize: 15, color: '#5B9BD5' }}>← 设置</Text></TouchableOpacity>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: bottomPad }}>
+        <Image source={{ uri: REWARD_IMAGE_URI }} style={{ width: 200, height: 200, borderRadius: 12 }} resizeMode="contain" />
         <Text style={{ fontSize: 13, color: c.muted, marginTop: 16 }}>感谢支持 Koyoi</Text>
       </View>
     </View>
@@ -211,9 +214,9 @@ function RewardPage({ isDark, onBack }: { isDark: boolean; onBack: () => void })
 
 function AboutPage({ isDark, onBack }: { isDark: boolean; onBack: () => void }) {
   const c = colors(isDark);
-  return (
+      return (
     <ScrollView style={{ flex: 1, backgroundColor: c.bg }} showsVerticalScrollIndicator={false}>
-      <TouchableOpacity onPress={onBack} style={{ paddingLeft: 20, paddingTop: 56, paddingBottom: 12 }}><Text style={{ fontSize: 15, color: '#5B9BD5' }}>← 设置</Text></TouchableOpacity>
+      <TouchableOpacity onPress={onBack} style={{ paddingLeft: 20, paddingTop: SAFE_TOP, paddingBottom: 12 }}><Text style={{ fontSize: 15, color: '#5B9BD5' }}>← 设置</Text></TouchableOpacity>
       <View style={{ alignItems: 'center', paddingTop: 30 }}>
         <Text style={{ fontSize: 32, fontWeight: '800', color: c.text, marginBottom: 8 }}>Koyoi</Text>
         <Text style={{ fontSize: 13, color: c.muted }}>版本 2.17.0 · Expo SDK 56</Text>

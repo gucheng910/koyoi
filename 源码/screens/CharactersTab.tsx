@@ -7,6 +7,7 @@ import { showAlert } from '../components/AnimatedAlert';
 import { useCharacterStore } from '../store/characterStore';
 import { getPresetCharacters, getPresetWorld } from '../prompts/characters/presets';
 import type { Character } from '../types';
+import { SAFE_TOP } from '../theme/safeArea';
 
 interface Props { isDark: boolean; onSelectChar: (c: Character) => void; }
 
@@ -15,7 +16,7 @@ const colors = (d: boolean) => d
   : { bg: '#F2F1F0', card: '#FFFFFF', sep: 'rgba(0,0,0,0.06)', text: '#1C1C1E', muted: '#8E8E93', accent: '#5B9BD5' };
 
 export default function CharactersTab({ isDark, onSelectChar }: Props) {
-  const c = colors(isDark);
+      const c = colors(isDark);
   const customChars = useCharacterStore(s => s.customCharacters);
   const [chars, setChars] = useState<Character[]>([]);
   const [search, setSearch] = useState('');
@@ -35,7 +36,7 @@ export default function CharactersTab({ isDark, onSelectChar }: Props) {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
-      <Text style={{ fontSize: 32, fontWeight: '800', color: c.text, paddingHorizontal: 20, paddingTop: 60, paddingBottom: 8, letterSpacing: 0.5 }}>角色库</Text>
+      <Text style={{ fontSize: 32, fontWeight: '800', color: c.text, paddingHorizontal: 20, paddingTop: SAFE_TOP, paddingBottom: 8, letterSpacing: 0.5 }}>角色库</Text>
       <TextInput
         style={{ marginHorizontal: 20, marginBottom: 12, backgroundColor: c.card, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, color: c.text, fontSize: 14, borderWidth: 1, borderColor: isDark ? '#2C2A22' : '#E8E4DD' }}
         placeholder="搜索角色名、世界观、性格..."

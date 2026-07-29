@@ -36,12 +36,15 @@ import { kbCharToCharacter } from '../services/characterAdapter';
 import { reanalyzeChapters } from '../services/chapterReanalyzer';
 import Toast from '../components/Toast';
 import FadeIn from '../components/FadeIn';
+import { SAFE_TOP } from '../theme/safeArea';
 
 interface Props { isDark: boolean; onStart: (world: World, character: Character, config: TransmigrationConfig, worldBible?: string, openingScene?: string, npcs?: WorldNpc[], worldState?: string) => void; onBack: () => void; }
 
-const T = (dark: boolean) => StyleSheet.create({
+const T = (dark: boolean, safeTop?: number) => {
+  const top = safeTop ?? 56;
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: dark ? '#0D0C0A' : '#FAF8F5' },
-  header: { paddingHorizontal: 20, paddingTop: 60, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: dark ? '#1A1814' : '#ddd' },
+  header: { paddingHorizontal: 20, paddingTop: top, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: dark ? '#1A1814' : '#ddd' },
   backBtn: { color: '#5577aa', fontSize: 15, marginBottom: 12 },
   title: { fontSize: 26, fontWeight: '700', color: dark ? '#E8DCC8' : '#1A1814' },
   sub: { fontSize: 13, color: dark ? '#888' : '#888', marginTop: 4 },
@@ -66,11 +69,12 @@ const T = (dark: boolean) => StyleSheet.create({
   startBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   content: { paddingHorizontal: 20, paddingBottom: 40 },
 });
+};
 
 type Step = 'upload' | 'split_done' | 'parsing' | 'config' | 'opening' | 'ready';
 
 export default function FanficScreen({ isDark, onStart, onBack }: Props) {
-  const st = T(isDark);
+      const st = T(isDark, SAFE_TOP);
   const configStore = useConfigStore();
   const [step, setStep] = useState<Step>('upload');
   const [building, setBuilding] = useState(false);
@@ -83,6 +87,10 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
   const [parseEstimate, setParseEstimate] = useState('');
   const [toast, setToast] = useState<{msg:string;type:'success'|'error'}>({msg:'',type:'success'});
   const [savedWorlds, setSavedWorlds] = useState<FanficWorldCard[]>([]);
+
+  // 分析预览
+  const [previewChars, setPreviewChars] = useState<Array<{name:string;traits:string[];sample:string}>>([]);
+  const [previewTimeline, setPreviewTimeline] = useState<Array<{chapter:number;summary:string}>>([]);
 
   // 穿越配置
   const [transType, setTransType] = useState<'soul'|'body'>('soul');
@@ -142,8 +150,17 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
       if (result.canceled) return;
       const file = result.assets[0];
       setParsingStatus('正在读取追加文件...');
-      const fetchResp = await fetch(file.uri);
-      const rawBytes = new Uint8Array(await fetchResp.arrayBuffer());
+      // 用 FileSystem 替代 fetch，兼容 content:// URI（部分机型 fetch 会挂起）
+      let readUri = file.uri;
+      if (readUri.startsWith('content://')) {
+        const cachedUri = (FileSystem.cacheDirectory || FileSystem.documentDirectory) + 'novel_app_' + Date.now() + '.txt';
+        await FileSystem.copyAsync({ from: readUri, to: cachedUri });
+        readUri = cachedUri;
+      }
+      const b64 = await FileSystem.readAsStringAsync(readUri, { encoding: FileSystem.EncodingType.Base64 });
+      const binaryStr = atob(b64);
+      const rawBytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) rawBytes[i] = binaryStr.charCodeAt(i);
       const content = normalizeEncoding(rawBytes);
       if (!content || content.length < 100) { setToast({msg:'文件内容过短', type:'error'}); setParsingStatus(''); return; }
       setStep('parsing');
@@ -247,8 +264,26 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
       if (result.canceled) { setProcessing(false); setParsingStatus(''); return; }
       const file = result.assets[0];
       setParsingStatus('正在读取追加文件...');
-      const fetchResp = await fetch(file.uri);
-      const rawBytes = new Uint8Array(await fetchResp.arrayBuffer());
+      // 用 FileSystem 读取，兼容 content:// URI（在国产 ROM 上 fetch 可能挂起）
+      let readUri = file.uri;
+      if (readUri.startsWith('content://')) {
+        setParsingStatus('正在复制文件...');
+        const cachedUri = (FileSystem.cacheDirectory || FileSystem.documentDirectory) + 'novel_append_' + Date.now() + '.txt';
+        await FileSystem.copyAsync({ from: readUri, to: cachedUri });
+        readUri = cachedUri;
+      }
+      // 加超时兜底，防止部分机型上 IO 永久挂起
+      setParsingStatus('正在读取文件...');
+      const readTimeout = new Promise<Uint8Array>((_, reject) => setTimeout(() => reject(new Error('读取超时')), 15000));
+      const b64 = await Promise.race([
+        FileSystem.readAsStringAsync(readUri, { encoding: FileSystem.EncodingType.Base64 }),
+        readTimeout,
+      ]);
+      setParsingStatus('正在解析编码...');
+      // Base64 → Uint8Array（比 fetch.arrayBuffer 更兼容）
+      const binaryStr = atob(b64);
+      const rawBytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) rawBytes[i] = binaryStr.charCodeAt(i);
       const appendContent = normalizeEncoding(rawBytes);
       if (!appendContent || appendContent.length < 100) { setToast({msg:'追加文件内容过短', type:'error'}); setProcessing(false); return; }
       setParsingStatus('正在扫描追加章节...');
@@ -330,6 +365,26 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
         setParsingStatus(chapterRange + '（' + (chunk.charCount / 1000).toFixed(0) + 'k字）\n已用 ' + elapsedMin + ' 分钟，预计还需 ' + eta);
       }, signal);
       if (results.length === 0) throw new Error('全部分析失败');
+
+      // 提取预览数据
+      const seen = new Set<string>();
+      const chars = [];
+      const tl = [];
+      for (const r of results) {
+        for (const c of r.characters) {
+          if (!seen.has(c.name) && c.speechSamples?.length > 0) {
+            seen.add(c.name);
+            chars.push({ name: c.name, traits: c.traits.slice(0, 4), sample: c.speechSamples[0]?.quote || '' });
+            if (chars.length >= 6) break;
+          }
+        }
+        for (const e of (r.events || []).slice(0, 3)) {
+          tl.push({ chapter: e.chapter, summary: e.event });
+        }
+        if (chars.length >= 6) break;
+      }
+      setPreviewChars(chars.slice(0, 6));
+      setPreviewTimeline(tl.slice(0, 12));
       console.log('[KOYOI] analyzeAllChunks done, results:', results.length);
       setParsingStatus('正在合并去重角色与关系…');
       console.log('[KOYOI] buildKnowledgeBase start');
@@ -595,7 +650,7 @@ ${isSoul ? '- 魂穿：写出意识进入新身体的错位感。你发现自己
       id: 'char_player_fanfic', name: transType === 'soul' ? (matchedChar?.name || targetCharId || '穿越者') : '穿越者', worldId: world.id, gender: usePersonaStore.getState().gender, age: '未知',
       appearance: { height: '', bodyType: '', bust: '', waist: '', hips: '', skinTone: '', hairStyle: '', facialFeatures: playerDesc || '穿越者', intimateDetails: '' },
       personality: { traits: ['穿越者'], speakingStyle: '', habits: [], likes: [], dislikes: [] },
-      sexualProfile: { libido: 5, experience: 3, dominance: 5, kinks: [], softLimits: [], hardLimits: [], sensitiveZones: [], sexualResponse: '' },
+      
       relationship: { intimacy: 0, trust: 0, submission: 0, arousal: 0, status: '刚刚穿越到这个世界' },
       backstory: `从现实世界穿越到《${worldCard.novelTitle}》的世界`,
       worldContext: { type: 'fanfic', sourceNovel: worldCard.novelTitle, originalRole: targetCharId || '外来者', originalFate: '未知' },
@@ -797,6 +852,38 @@ ${isSoul ? '- 魂穿：写出意识进入新身体的错位感。你发现自己
               <ActivityIndicator size="large" color="#5B9BD5" />
               <Text style={st.parsingText}>{parsingStatus}</Text>
             </View>
+
+            {/* 预览：角色台词卡片 */}
+            {previewChars.length > 0 && (
+              <View style={{ marginTop: 16 }}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#8A8070', letterSpacing: 2, marginBottom: 10 }}>已发现角色</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+                  {previewChars.map((c, i) => (
+                    <View key={i} style={{ width: 160, backgroundColor: isDark ? '#1C1912' : '#FFF', borderRadius: 12, padding: 12, marginRight: 10, borderWidth: 1, borderColor: isDark ? '#2C2A22' : '#E8E4DD' }}>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: isDark ? '#E8DCC8' : '#2D2822', marginBottom: 4 }}>{c.name}</Text>
+                      <Text style={{ fontSize: 10, color: '#5B9BD5', marginBottom: 6 }}>{c.traits.join(' · ')}</Text>
+                      {c.sample ? <Text style={{ fontSize: 11, color: isDark ? '#8A8070' : '#8A8070', fontStyle: 'italic', lineHeight: 16 }}>「{c.sample.slice(0, 50)}…」</Text> : null}
+                    </View>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
+            {/* 预览：剧情时间线 */}
+            {previewTimeline.length > 0 && (
+              <View style={{ marginTop: 8 }}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#8A8070', letterSpacing: 2, marginBottom: 10 }}>剧情脉络</Text>
+                <View style={{ backgroundColor: isDark ? '#1C1912' : '#FFF', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: isDark ? '#2C2A22' : '#E8E4DD' }}>
+                  {previewTimeline.slice(0, 6).map((t, i) => (
+                    <View key={i} style={{ flexDirection: 'row', marginBottom: 8 }}>
+                      <Text style={{ fontSize: 10, color: '#5B9BD5', fontWeight: '600', width: 40 }}>{'第' + (t.chapter + 1) + '章'}</Text>
+                      <Text style={{ fontSize: 12, color: isDark ? '#C8BFA0' : '#5A5450', flex: 1, lineHeight: 16 }}>{t.summary.slice(0, 60)}</Text>
+                    </View>
+                  ))}
+                  {previewTimeline.length > 6 && <Text style={{ fontSize: 10, color: '#8A8070', textAlign: 'center', marginTop: 4 }}>还有 {previewTimeline.length - 6} 个事件…</Text>}
+                </View>
+              </View>
+            )}
           </>
         )}
 
@@ -931,7 +1018,7 @@ ${isSoul ? '- 魂穿：写出意识进入新身体的错位感。你发现自己
                             gender: 'other' as const, age: '未知',
                             appearance: { height: '', bodyType: '', bust: '', waist: '', hips: '', skinTone: '', hairStyle: '', facialFeatures: '', intimateDetails: '' },
                             personality: { traits: newCharTraits.split(/[,，]/).map(s => s.trim()).filter(Boolean), speakingStyle: '', habits: [], likes: [], dislikes: [] },
-                            sexualProfile: { libido: 5, experience: 3, dominance: 5, kinks: [], softLimits: [], hardLimits: [], sensitiveZones: [], sexualResponse: '' },
+                            
                             relationship: { intimacy: 0, trust: 0, submission: 0, arousal: 0, status: newCharRole.trim() || '原著角色' },
                             backstory: '手动添加', worldContext: { type: 'fanfic' as const, sourceNovel: worldCard.novelTitle, originalRole: newCharRole.trim(), originalFate: '' },
                             autonomy: { goals: [], schedule: '', agency: 5 }, memories: [], exampleDialogues: [],
