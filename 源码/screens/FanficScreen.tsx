@@ -150,17 +150,19 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
       if (result.canceled) return;
       const file = result.assets[0];
       setParsingStatus('正在读取追加文件...');
-      // 用 FileSystem 替代 fetch，兼容 content:// URI（部分机型 fetch 会挂起）
+      // fetch 直接读原始字节（v2.17.0 方式），content:// 复制到缓存后走 file://
       let readUri = file.uri;
       if (readUri.startsWith('content://')) {
+        setParsingStatus('正在复制文件...');
         const cachedUri = (FileSystem.cacheDirectory || FileSystem.documentDirectory) + 'novel_app_' + Date.now() + '.txt';
         await FileSystem.copyAsync({ from: readUri, to: cachedUri });
         readUri = cachedUri;
       }
-      const b64 = await FileSystem.readAsStringAsync(readUri, { encoding: FileSystem.EncodingType.Base64 });
-      const binaryStr = atob(b64);
-      const rawBytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) rawBytes[i] = binaryStr.charCodeAt(i);
+      const readTimeout = new Promise<Uint8Array>((_, reject) => setTimeout(() => reject(new Error('读取超时')), 15000));
+      const rawBytes = await Promise.race([
+        fetch(readUri).then(r => r.arrayBuffer()).then(buf => new Uint8Array(buf)),
+        readTimeout,
+      ]);
       const content = normalizeEncoding(rawBytes);
       if (!content || content.length < 100) { setToast({msg:'文件内容过短', type:'error'}); setParsingStatus(''); return; }
       setStep('parsing');
@@ -264,7 +266,8 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
       if (result.canceled) { setProcessing(false); setParsingStatus(''); return; }
       const file = result.assets[0];
       setParsingStatus('正在读取追加文件...');
-      // 用 FileSystem 读取，兼容 content:// URI（在国产 ROM 上 fetch 可能挂起）
+      // 用 fetch 直接读原始字节（v2.17.0 方式，速度快且不乱码）
+      // content:// 复制到缓存后是 file://，fetch 同样可读
       let readUri = file.uri;
       if (readUri.startsWith('content://')) {
         setParsingStatus('正在复制文件...');
@@ -272,18 +275,14 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
         await FileSystem.copyAsync({ from: readUri, to: cachedUri });
         readUri = cachedUri;
       }
-      // 加超时兜底，防止部分机型上 IO 永久挂起
+      // 加超时兜底，防止部分机型上 fetch 永久挂起
       setParsingStatus('正在读取文件...');
       const readTimeout = new Promise<Uint8Array>((_, reject) => setTimeout(() => reject(new Error('读取超时')), 15000));
-      const b64 = await Promise.race([
-        FileSystem.readAsStringAsync(readUri, { encoding: FileSystem.EncodingType.Base64 }),
+      const rawBytes = await Promise.race([
+        fetch(readUri).then(r => r.arrayBuffer()).then(buf => new Uint8Array(buf)),
         readTimeout,
       ]);
       setParsingStatus('正在解析编码...');
-      // Base64 → Uint8Array（比 fetch.arrayBuffer 更兼容）
-      const binaryStr = atob(b64);
-      const rawBytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) rawBytes[i] = binaryStr.charCodeAt(i);
       const appendContent = normalizeEncoding(rawBytes);
       if (!appendContent || appendContent.length < 100) { setToast({msg:'追加文件内容过短', type:'error'}); setProcessing(false); return; }
       setParsingStatus('正在扫描追加章节...');
