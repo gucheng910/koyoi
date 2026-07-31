@@ -82,6 +82,10 @@ export interface World {
   writingStyle?: string;
   styleSamples?: string[];
   customRules?: string;
+  abilities?: AbilityState[];  // 能力状态时间线（动态规则系统，同人模式用）
+  foreshadows?: Foreshadow[];  // 伏笔清单（同人模式用）
+  milestones?: RelationshipMilestoneSet[];  // 关系里程碑（同人模式用）
+  scenes?: SignatureScene[];  // 名场面清单（同人模式用）
   characters?: Character[];  // 同人世界：从原著解析的所有角色
   keyDecisions?: { who: string; dilemma: string; chose: string; consequence: string }[];
 }
@@ -209,6 +213,50 @@ export interface FanficConfig {
   targetCharacterId?: string;
 }
 
+/** 伏笔（长线叙事元素）：埋设→回收，未回收期间持续注入提示词 */
+export interface Foreshadow {
+  name: string;      // 伏笔名（如头绳）
+  planted: number;   // 埋设章节（1-based）
+  hint?: string;     // 线索描述
+  payoff?: number;   // 回收章节（运行时自动标记）
+  resolved?: boolean;// 是否已回收
+}
+
+/** 关系里程碑：某角色的关系发展关键节点（运行时事件匹配自动标记达成） */
+export interface RelationshipMilestone {
+  name: string;         // 节点名（如获救确定关系）
+  boundEvent: string;   // 绑定事件描述（用于剧情匹配，10字内）
+  chapter?: number | null;  // 参考章节
+  achieved?: boolean;   // 是否已达成
+}
+
+export interface RelationshipMilestoneSet {
+  character: string;
+  milestones: RelationshipMilestone[];
+}
+
+/** 名场面：影响全局的关键场面，运行时情境匹配后注入原著走向提示 */
+export interface SignatureScene {
+  title: string;              // 场面名
+  trigger?: {
+    location?: string;        // 触发地点
+    characters?: string[];    // 关键角色
+    keywords?: string[];      // 触发关键词
+  };
+  originalPlot: string;       // 原著此处剧情走向
+  butterflyHint?: string;     // 蝴蝶效应提示
+  chapter: number;            // 参考章节（1-based）
+}
+
+/** 能力状态（动态规则系统）：能力随章节时间轴变化 */
+export interface AbilityState {
+  name: string;
+  start: number;       // 起始章节（1-based）
+  end?: number | null; // 退化/结束章节
+  status: 'active' | 'degraded';
+  details: string;     // 能力描述与限制
+}
+
 export interface FanficWorldCard {
   id: string;
   novelTitle: string;
@@ -225,6 +273,10 @@ export interface FanficWorldCard {
   totalChapters: number;
   parsedAt: string;
   styleFeatures?: string;   // AI 分析的写作风格特征（句长/节奏/修辞等）
+  abilities?: AbilityState[];  // 能力状态时间线（动态规则）
+  foreshadows?: Foreshadow[];  // 伏笔清单
+  milestones?: RelationshipMilestoneSet[];  // 关系里程碑
+  scenes?: SignatureScene[];  // 名场面清单
 }
 
 // ---- 章节分割 & 存储 ----
@@ -279,6 +331,8 @@ export interface ChapterAnalyzeResult {
   }>;
   locations: Array<{ name: string; description: string; chapters: number[] }>;
   styleSamples: Array<{ text: string; chapter: number }>;
+  worldRules?: string[];  // 本块提取的超自然能力/世界规则线索
+  foreshadows?: Array<{ name: string; planted: number; hint?: string }>;  // 本块提取的伏笔
 }
 
 // ---- 知识库 ----
@@ -298,6 +352,11 @@ export interface KnowledgeBase {
     architecture: string;
     geography: string;
     sexualNorms: string;
+    worldType?: string;   // AI 判定的世界观类型（cultivation/modern/campus/...）
+    abilities?: AbilityState[];  // 能力状态时间线（动态规则系统）
+    foreshadows?: Foreshadow[];  // 伏笔清单（动态叙事元素）
+    milestones?: RelationshipMilestoneSet[];  // 关系里程碑（按角色）
+    scenes?: SignatureScene[];  // 名场面清单（情境匹配注入）
   };
   styleProfile: Array<{ chapterRange: [number, number]; traits: string; samples: string[] }>;
   globalTimeline: Array<{
@@ -306,6 +365,8 @@ export interface KnowledgeBase {
     event: string;
     involvedCharacters: string[];
   }>;
+  worldRuleClues?: string[];  // 各块汇总的能力/规则线索（供全局合成归纳）
+  foreshadows?: Foreshadow[];  // 汇总的伏笔清单（运行时按章节注入）
 }
 
 export interface TransmigrationConfig {
@@ -482,6 +543,7 @@ export interface WorldSession {
   memories?: string[];
   currentChapter?: number;       // 当前所处章节（0-based），同人模式用
   worldNovelId?: string;         // 关联的 NovelStorage worldId，同人模式用
+  fanficConfig?: TransmigrationConfig;  // 穿越配置（魂穿/身穿），同人模式用
   timelinePosition?: TimelinePosition;
   worldClock?: number;
   characterMoods?: Record<string, CharacterMoodState>;

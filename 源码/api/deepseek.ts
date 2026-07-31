@@ -59,6 +59,8 @@ export async function chatCompletion(
     // 思考模式下 temperature 无效，不传
   } else {
     body.temperature = config.temperature;
+    // 显式关闭思考：V4 系列默认可能启用 thinking，会耗尽 max_tokens 导致空响应
+    body.thinking = { type: 'disabled' };
   }
 
   if (config.safetyFilter !== 'moderate') {
@@ -146,11 +148,16 @@ export async function chatCompletionSync(
     body.reasoning_effort = config.reasoningEffort || 'high';
   } else {
     body.temperature = options?.temperature ?? 0.3;
+    // 显式关闭思考：V4 系列默认可能启用 thinking，会耗尽 max_tokens 导致空响应
+    body.thinking = { type: 'disabled' };
   }
 
   const endpoint = `${config.baseUrl}/v1/chat/completions`;
 
   let response: Response;
+  // 默认 120 秒超时：API 挂起时避免整个流程卡死（分析/推演/记忆等后台调用）
+  const timeoutController = new AbortController();
+  const timeoutTimer = setTimeout(() => timeoutController.abort(), 120000);
   try {
     response = await fetch(endpoint, {
       method: 'POST',
@@ -159,11 +166,16 @@ export async function chatCompletionSync(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
-      signal: options?.signal,
+      signal: options?.signal || timeoutController.signal,
     });
   } catch (e: any) {
-    if (e.name === 'AbortError') throw e;
+    if (e.name === 'AbortError') {
+      if (options?.signal) throw e;
+      throw new Error('请求超时，请重试');
+    }
     throw new Error('网络连接失败，请检查网络后重试');
+  } finally {
+    clearTimeout(timeoutTimer);
   }
 
   if (!response.ok) {
@@ -261,7 +273,15 @@ async function readStream(
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      // 30 秒无数据判定断线，避免 API 连接断开后永久挂起
+      const readPromise = reader.read();
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => {
+          reader.cancel().catch(() => {}); // 取消挂起的读取，释放连接
+          reject(new Error('流式响应超时，请重试'));
+        }, 30000)
+      );
+      const { done, value } = await Promise.race([readPromise, timeoutPromise]);
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
@@ -273,7 +293,7 @@ async function readStream(
         if (!trimmed || !trimmed.startsWith('data: ')) continue;
 
         const data = trimmed.slice(6);
-        if (data === '[DONE]') continue;
+        if (data === '[DONE]') break;  // 流结束，立即退出（API 可能保持连接不关闭）
 
         try {
           const parsed = JSON.parse(data);
@@ -396,6 +416,8 @@ async function handleFunctionCallLoop(
     body.reasoning_effort = config.reasoningEffort || 'high';
   } else {
     body.temperature = config.temperature;
+    // 显式关闭思考：V4 系列默认可能启用 thinking，会耗尽 max_tokens 导致空响应
+    body.thinking = { type: 'disabled' };
   }
 
   const endpoint = `${config.baseUrl}/v1/chat/completions`;

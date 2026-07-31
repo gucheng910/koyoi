@@ -127,9 +127,13 @@ export async function reSummarizeMemories(
 }
 
 function extractKeywords(text: string): string[] {
-  // 按标点切分后取有语义的整词（2~6 字），避免滑动窗口重叠噪声
-  const rawSegments = text.split(/[，。！？、；：""''（）\[\]【】\s]+/);
-  const words = rawSegments.filter(s => /^[\u4e00-\u9fff]{2,6}$/.test(s));
+  // 简单中文分词：取 2-4 字片段
+  const words: string[] = [];
+  for (let i = 0; i < text.length - 1; i++) {
+    words.push(text.slice(i, i + 2));
+  }
+  // 过滤掉标点、数字、英文
+  const filtered = words.filter(w => /^[\u4e00-\u9fff]{2,}$/.test(w));
   // 去重后取前 10 个
-  return [...new Set(words)].slice(0, 10);
+  return [...new Set(filtered)].slice(0, 10);
 }

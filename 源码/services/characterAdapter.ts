@@ -3,7 +3,7 @@
 //  统一 KB 角色格式与 Character 类型，消除 as any
 // ============================================================
 
-import type { Character } from '../types';
+import type { Character, CharacterBehaviorProfile } from '../types';
 
 /**
  * KB 角色格式（来自知识库提取）
@@ -23,6 +23,7 @@ export interface KbCharacter {
   speechSamples: Array<{ quote: string; chapter: number }>;
   firstAppear: number;
   lastAppear: number;
+  behaviorProfile?: CharacterBehaviorProfile;  // 主角精读生成的行为引擎
 }
 
 /**
@@ -53,6 +54,7 @@ export function kbCharToCharacter(c: KbCharacter, worldId: string, idx: number, 
       likes: [],
       dislikes: [],
       ...(deepBackstory ? { _deepProfile: deepBackstory } : {}),
+      ...(c.behaviorProfile ? { behaviorProfile: c.behaviorProfile } : {}),
     } as any,
     
     relationship: { intimacy: 0, trust: 0, submission: 0, arousal: 0, status: c.role },

@@ -20,8 +20,14 @@ export async function runCharacterSimulation(
   attitudes: React.MutableRefObject<Record<string, any>>
 ): Promise<CharacterAction[]> {
   console.log('[PIPELINE] stage4 simulation start turn=' + turnCount + ' active=' + activeChars.current.length);
+  // 同人模式：玩家角色不参与推演（玩家的行动由玩家控制，不被 AI 操控）
+  const playerNames = new Set<string>();
+  if (isFanfic && session.selectedCharacters.length > 0) {
+    playerNames.add(session.selectedCharacters[0].name);
+  }
   const chars = [
     ...session.selectedCharacters
+      .filter(c => !playerNames.has(c.name))
       .filter(c => activeChars.current.includes(c.name))
       .map(c => ({
         name: c.name, personality: c.personality.traits.join('/'), deepPersonality: '',

@@ -234,6 +234,7 @@ function AppContent() {
                 timestamp: new Date().toISOString(),
               }],
               createdAt: new Date().toISOString(),
+              fanficConfig: tmConfig,
             };
             setWorldSession(session);
             setShowFanfic(false);

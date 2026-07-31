@@ -23,7 +23,7 @@ import jschardet from 'jschardet';
 
 // 编码检测（基于 jschardet）
 
-import { createNovel, updateNovelMeta, deleteNovel, getChapter } from '../services/novelStorage';
+import { createNovel, updateNovelMeta, deleteNovel, getChapter, getNovelMeta } from '../services/novelStorage';
 import { b64ToUtf8 } from '../services/base64';
 import { assembleChunks, formatChunkInfo } from '../services/chunkAssembler';
 import { analyzeAllChunks } from '../services/chapterAnalyzer';
@@ -32,6 +32,7 @@ import { loadKnowledgeBase } from '../services/knowledgeBase';
 import { appendToWorld } from '../services/novelAppend';
 import { synthesizeTimeline, applySynthesis, extractKeyDecisions } from '../services/timelineSynthesizer';
 import { analyzeStyleFeatures } from '../services/styleAnalyzer';
+import { deepDiveProtagonists } from '../services/characterDeepDive';
 import { kbCharToCharacter } from '../services/characterAdapter';
 import { reanalyzeChapters } from '../services/chapterReanalyzer';
 import Toast from '../components/Toast';
@@ -150,13 +151,8 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
       if (result.canceled) return;
       const file = result.assets[0];
       setParsingStatus('正在读取追加文件...');
-      // v2.17.0 方式：直接 fetch(file.uri)，不复制缓存，保证字节完整
-      // 加超时兜底，防止部分机型上 fetch 永久挂起
-      const readTimeout = new Promise<Uint8Array>((_, reject) => setTimeout(() => reject(new Error('读取超时，请重试')), 15000));
-      const rawBytes = await Promise.race([
-        fetch(file.uri).then(r => r.arrayBuffer()).then(buf => new Uint8Array(buf)),
-        readTimeout,
-      ]);
+      const fetchResp = await fetch(file.uri);
+      const rawBytes = new Uint8Array(await fetchResp.arrayBuffer());
       const content = normalizeEncoding(rawBytes);
       if (!content || content.length < 100) { setToast({msg:'文件内容过短', type:'error'}); setParsingStatus(''); return; }
       setStep('parsing');
@@ -260,14 +256,8 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
       if (result.canceled) { setProcessing(false); setParsingStatus(''); return; }
       const file = result.assets[0];
       setParsingStatus('正在读取追加文件...');
-      // v2.17.0 方式：直接 fetch(file.uri)，不复制缓存，保证字节完整
-      // 加超时兜底，防止部分机型上 fetch 永久挂起
-      const readTimeout = new Promise<Uint8Array>((_, reject) => setTimeout(() => reject(new Error('读取超时，请重试')), 15000));
-      const rawBytes = await Promise.race([
-        fetch(file.uri).then(r => r.arrayBuffer()).then(buf => new Uint8Array(buf)),
-        readTimeout,
-      ]);
-      setParsingStatus('正在解析编码...');
+      const fetchResp = await fetch(file.uri);
+      const rawBytes = new Uint8Array(await fetchResp.arrayBuffer());
       const appendContent = normalizeEncoding(rawBytes);
       if (!appendContent || appendContent.length < 100) { setToast({msg:'追加文件内容过短', type:'error'}); setProcessing(false); return; }
       setParsingStatus('正在扫描追加章节...');
@@ -385,6 +375,11 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
       console.log('[KOYOI] analyzeStyle start');
       const styleFeatures = await analyzeStyleFeatures(cfg, kb);
       console.log('[KOYOI] styleFeatures length:', styleFeatures?.length || 0);
+      // 关键角色深挖：对主角团生成行为决策引擎（写回 kb.characters，随知识库保存）
+      try {
+        const dived = await deepDiveProtagonists(cfg, kb, (msg) => setParsingStatus(msg));
+        if (dived.length > 0) console.log('[KOYOI] deep dive done:', dived.length, 'chars');
+      } catch (e: any) { console.warn('[KOYOI] deep dive failed:', e.message); }
       console.log('[KOYOI] saveKnowledgeBase start');
       setParsingStatus('正在保存分析结果…');
       await saveKnowledgeBase(kb);
@@ -416,6 +411,30 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
     }
   };
 
+  /**
+   * 世界观类型兜底推断：根据已提取的世界规则文本综合判断
+   */
+  function inferWorldType(ws: any): string {
+    const s = String((ws && (ws.supernatural || '')) || '') + String((ws && (ws.society || '')) || '') + String((ws && (ws.culture || '')) || '');
+    if (/修仙|灵气|宗门|炼丹|元婴|法宝/.test(s)) return 'cultivation';
+    if (/魔法|斗气|异世界|剑与魔法/.test(s)) return 'fantasy';
+    if (/高中|校园|大学|班级|学院/.test(s)) return 'campus';
+    if (/赛博|义体|网络空间|黑客/.test(s)) return 'cyberpunk';
+    if (/末日|丧尸|废土|幸存/.test(s)) return 'apocalypse';
+    if (/古代|王朝|皇帝|科举|朝堂/.test(s)) return 'historical';
+    return 'modern';
+  }
+
+  /**
+   * 世界观类型中文标签
+   */
+  const WORLD_TYPE_LABELS: Record<string, string> = {
+    modern: '现代都市', cultivation: '修仙', fantasy: '奇幻', cyberpunk: '赛博朋克',
+    apocalypse: '末日废土', historical: '古风', campus: '校园', fanfic: '同人',
+    wuxia: '武侠', urban: '都市', interstellar: '星际', game: '游戏世界',
+    supernatural: '超自然', alternate_history: '架空历史', custom: '自定义',
+  };
+
   function buildWorldCardFromKB(kb: KnowledgeBase, meta?: NovelMeta | null, synthWorldType?: string, styleFeatures?: string): FanficWorldCard {
     const chars: Character[] = kb.characters.map((c, i) => kbCharToCharacter(c as any, kb.worldId, i, meta?.title));
     const timeline: TimelineEvent[] = kb.plot.filter(p => p.summary).map((p, i) => ({
@@ -425,10 +444,14 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
     return {
       id: kb.worldId, novelTitle: meta?.title || '未知小说',
       writingStyle: kb.styleProfile.map(s => s.samples.join(' / ')).join(' | '), styleSamples: kb.styleProfile.flatMap(s => s.samples).slice(0, 8),
-      worldType: (synthWorldType || ((kb.worldSettings.supernatural || '').includes('修仙') ? 'cultivation' : 'modern')) as WorldType,
-      rules: { physics: '', supernatural: kb.worldSettings.supernatural, technology: '', society: kb.worldSettings.society, morality: '', sexualNorms: kb.worldSettings.sexualNorms },
+      worldType: (synthWorldType || (kb.worldSettings as any).worldType || inferWorldType(kb.worldSettings)) as WorldType,
+      rules: { physics: '', supernatural: kb.worldSettings.supernatural, technology: '', society: kb.worldSettings.society, morality: '', culture: kb.worldSettings.culture || '', sexualNorms: kb.worldSettings.sexualNorms },
       locations: locs, factions: [], timeline, characters: chars, keyDecisions: [], totalChapters: kb.chapterCount, parsedAt: kb.analyzedAt,
       styleFeatures: styleFeatures || '',
+      abilities: (kb.worldSettings as any).abilities || [],
+      foreshadows: (kb.worldSettings as any).foreshadows || [],
+      milestones: (kb.worldSettings as any).milestones || [],
+      scenes: (kb.worldSettings as any).scenes || [],
     };
   }
 
@@ -628,6 +651,10 @@ ${isSoul ? '- 魂穿：写出意识进入新身体的错位感。你发现自己
       butterflySensitivity: { minor: '个人选择产生涟漪', major: '重大干预改变剧情走向' },
       writingStyle: worldCard.writingStyle, styleSamples: worldCard.styleSamples,
       keyDecisions: worldCard.keyDecisions || [], characters: worldCard.characters,
+      abilities: worldCard.abilities || [],
+      foreshadows: worldCard.foreshadows || [],
+      milestones: worldCard.milestones || [],
+      scenes: worldCard.scenes || [],
     };
     const matchedChar = targetCharId ? worldCard.characters.find(c => c.name === targetCharId || c.id === targetCharId) : null;
     const playerChar: Character = {
@@ -716,17 +743,21 @@ ${isSoul ? '- 魂穿：写出意识进入新身体的错位感。你发现自己
                   <TouchableOpacity key={w.id} style={[st.btn, { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 14, marginBottom: 8, width: '100%' }]} 
                     onPress={() => {
                     setParsingStatus('正在加载知识库...');
-                    loadKnowledgeBase(w.id).then(kb => {
+                    loadKnowledgeBase(w.id).then(async (kb) => {
                       setParsingStatus('');
                       if (kb && kb.characters && kb.characters.length > 0) {
-                        const card = buildWorldCardFromKB(kb, novelMeta);
+                        // 加载小说元数据（标题等），避免显示"未知小说"
+                        let meta: NovelMeta | null = null;
+                        try {
+                          meta = await getNovelMeta(w.id);
+                        } catch {}
+                        const card = buildWorldCardFromKB(kb, meta || (w as any));
                         setWorldCard(card);
                       } else {
                         setWorldCard(w);
                       }
                       setStep('config');
-                    }).catch(() => {
-                      setParsingStatus('');
+                    }).catch(() => {                      setParsingStatus('');
                       setWorldCard(w);
                       setStep('config');
                     });
@@ -880,10 +911,16 @@ ${isSoul ? '- 魂穿：写出意识进入新身体的错位感。你发现自己
             <Text style={st.label}>原著书名</Text>
             <Text style={st.val}>{novelMeta?.originalFileName || worldCard.novelTitle}</Text>
             <Text style={st.label}>世界观类型</Text>
-            <Text style={st.val}>{worldCard.worldType}</Text>
+            <Text style={st.val}>{WORLD_TYPE_LABELS[worldCard.worldType] || worldCard.worldType}</Text>
             <Text style={st.label}>世界观规则</Text>
-            <Text style={st.val}>{(worldCard.rules?.supernatural || worldCard.rules?.physics || '未提取')}</Text>
-            <Text style={st.val}>{worldCard.rules?.society || '未提取'}</Text>
+            {[
+              worldCard.rules?.supernatural,
+              worldCard.rules?.society,
+              worldCard.rules?.culture,
+              worldCard.rules?.sexualNorms,
+            ].filter(Boolean).map((r, i) => (
+              <Text key={i} style={st.val}>{String(r)}</Text>
+            ))}
             {worldCard.timeline.length > 0 && (
               <>
                 <Text style={st.label}>关键剧情</Text>

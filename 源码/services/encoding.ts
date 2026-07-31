@@ -17,9 +17,28 @@ export function normalizeEncoding(bytes: Uint8Array): string {
     return new TextDecoder('utf-8').decode(bytes.slice(3));
   }
 
+  // 采样检测：大文件全量统计耗时数十秒，取开头单段样本
+  // 注意：多段拼接会破坏编码字节序列边界（GBK 双字节/UTF-8 三字节在拼接处断开），
+  // 导致 ICU 误判，因此只用文件开头连续 128KB
+  const SAMPLE_SIZE = 128 * 1024;
+  let detectBytes = bytes;
+  if (bytes.length > SAMPLE_SIZE) {
+    detectBytes = bytes.slice(0, SAMPLE_SIZE);
+  }
+
   // ICU chardet 检测（传入原始字节数组，不做任何预处理）
-  const result = detectEncoding(bytes);
+  const result = detectEncoding(detectBytes);
   console.log('[ENCODING] detected:', result);
+
+  // UTF-8 自验证：GBK/Big5 等多字节序列几乎不可能通过严格 UTF-8 解码，
+  // 防止采样样本不足导致 UTF-8 文件被误判为其他编码
+  if (result && result.toLowerCase() !== 'utf-8' && result.toLowerCase() !== 'ascii') {
+    try {
+      new TextDecoder('utf-8', { fatal: true }).decode(detectBytes);
+      console.log('[ENCODING] utf-8 self-verify passed, override ' + result);
+      return utf8Decode(bytes);
+    } catch {}
+  }
 
   if (!result) return utf8Decode(bytes);
 

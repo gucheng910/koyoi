@@ -183,6 +183,7 @@ export async function appendToWorld(
       event: p.summary,
       involvedCharacters: [],
     })),
+    worldRuleClues: [...new Set([...(kb.worldRuleClues || []), ...(newKB.worldRuleClues || [])])].slice(0, 40),
   };
   try {
     const synth = await synthesizeTimeline(config, worldId, mergedKB);

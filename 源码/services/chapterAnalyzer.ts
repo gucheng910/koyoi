@@ -14,7 +14,7 @@ import type { AnalysisChunk } from './chunkAssembler';
 const ANALYZE_SYSTEM_SIMPLE = `你是小说分析引擎。从以下小说片段中提取角色、事件、文风。直接返回JSON，不要任何解释文字。`;
 
 function buildSimplePrompt(chunk: AnalysisChunk, chunkText: string): string {
-  return `分析第${chunk.chapterStart+1}~${chunk.chapterEnd+1}章。提取角色（真实名字）、事件、文风段落。\n\n只返回JSON（注意"name"要填角色的真实名字，不要填"角色名"三个字）：\n{\n  "characters": [{"name":"这里填角色真实名字","gender":"男/女/未知","role":"身份","traits":["性格词"],"dialogue":["原文台词"]}],\n  "events": [{"chapter":${chunk.chapterStart+1},"event":"发生了什么"}],\n  "styleSamples": ["原文段落"]\n}\n\n小说片段：\n${chunkText.slice(0, 28000)}`;
+  return `分析第${chunk.chapterStart+1}~${chunk.chapterEnd+1}章。提取角色（真实名字）、事件、文风段落、能力/规则线索。\n\n只返回JSON（注意"name"要填角色的真实名字，不要填"角色名"三个字）：\n{\n  "characters": [{"name":"这里填角色真实名字","gender":"男/女/未知","role":"身份","traits":["性格词"],"dialogue":["原文台词"]}],\n  "events": [{"chapter":${chunk.chapterStart+1},"event":"发生了什么"}],\n  "worldRules": ["超自然能力/规则线索，如：主角能力每周刷新旧能力退化"],\n  "styleSamples": ["原文段落"]\n}\n\n小说片段：\n${chunkText.slice(0, 28000)}`;
 }
 
 const ANALYZE_SYSTEM = `你是小说分析引擎。你的任务是逐块提取小说信息，为后续全局合成提供原材料。
@@ -90,6 +90,22 @@ function buildAnalyzePrompt(chunk: AnalysisChunk, chunkText: string): string {
 第Y章："原文段落..."
 \`\`\`
 
+### 能力与规则线索
+提取本块出现的超自然能力/世界规则/特殊机制线索（如：主角有什么能力、能力是否变化/新增/弱化、世界的特殊规则、超自然设定），每条 30 字以内：
+\`\`\`
+第X章：线索描述
+第Y章：线索描述
+\`\`\`
+注意：能力的变化（新增/刷新/退化）比能力本身更重要，务必记录。
+
+### 伏笔
+提取本块出现的伏笔/悬念（埋设的线索、未解释的细节、预示未来的物件/话语/约定），每条格式：
+\`\`\`
+第X章：伏笔名|线索描述（20字以内）
+第Y章：伏笔名|线索描述
+\`\`\`
+伏笔名要短（2-6字，如"头绳""杨桃儿""那个约定"），描述说明它为何是伏笔。
+
 最终用 JSON 包裹所有结果：
 {
   "chapterRange": [${chunk.chapterStart + 1}, ${chunk.chapterEnd + 1}],
@@ -97,6 +113,8 @@ function buildAnalyzePrompt(chunk: AnalysisChunk, chunkText: string): string {
   "rawEvents": "上述事件部分的完整文本",
   "rawRelations": "上述关系部分的完整文本",
   "rawLocations": "上述地点部分的完整文本",
+  "rawWorldRules": "上述能力规则部分的完整文本",
+  "rawForeshadows": "上述伏笔部分的完整文本",
   "styleSamples": [{"text":"原文段落","chapter":X}, ...]
 }
 
@@ -149,6 +167,8 @@ function fallbackParse(raw: string, chunk: AnalysisChunk): ChapterAnalyzeResult 
     relations: [],
     locations: [],
     styleSamples: [],
+    worldRules: [],
+    foreshadows: [],
   };
 }
 
@@ -302,6 +322,33 @@ function parseAnalysis(
       }
     }
 
+    // 解析能力与规则线索
+    const worldRules: string[] = [];
+    if (parsed.rawWorldRules) {
+      const ruleLines = parsed.rawWorldRules.split('\n').filter(Boolean);
+      for (const line of ruleLines) {
+        const m = line.match(/第(\d+)章[：:](.+)/);
+        if (m) {
+          const clue = m[2].trim().replace(/[\n\r]/g, '').slice(0, 50);
+          if (clue) worldRules.push(`第${m[1]}章：${clue}`);
+        }
+      }
+    }
+
+    // 解析伏笔
+    const foreshadows: Array<{ name: string; planted: number; hint?: string }> = [];
+    if (parsed.rawForeshadows) {
+      const fLines = parsed.rawForeshadows.split(String.fromCharCode(10)).filter(Boolean);
+      for (const line of fLines) {
+        const m = line.match(/第(\d+)章[：:]\s*(.+?)[|｜]\s*(.+)/);
+        if (m) {
+          const name = m[2].trim().slice(0, 12);
+          const hint = m[3].trim().slice(0, 40);
+          if (name) foreshadows.push({ name, planted: parseInt(m[1]), hint: hint || undefined });
+        }
+      }
+    }
+
     // 文风样本
     const styleSamples = (parsed.styleSamples || []).map((s: any) => ({
       text: typeof s === 'string' ? s : s.text || '',
@@ -315,6 +362,8 @@ function parseAnalysis(
       relations,
       locations,
       styleSamples: styleSamples.filter((s: any) => s.text.length > 10),
+      worldRules,
+      foreshadows,
     };
   } catch {
     return null;
@@ -374,6 +423,8 @@ export async function analyzeChunk(
         relations: [],
         locations: [],
         styleSamples: (parsed.styleSamples || []).filter((s: any) => typeof s === 'string' && s.length > 10).map((s: string) => ({ text: s, chapter: chunk.chapterStart })),
+        worldRules: (parsed.worldRules || []).map((r: any) => typeof r === 'string' ? r : (r.clue || '')),
+        foreshadows: (parsed.foreshadows || []).map((f: any) => ({ name: f.name || f, planted: f.planted || chunk.chapterStart + 1, hint: f.hint })),
       };
     }
   } catch {}

@@ -168,6 +168,22 @@ export function buildKnowledgeBase(
   const relations = mergeRelations(allResults);
   const plot = mergeEvents(allResults);
 
+  // 汇总各块提取的能力/规则线索（供全局合成归纳能力体系）
+  const worldRuleClues = [...new Set(allResults.flatMap(r => r.worldRules || []))].slice(0, 40);
+
+  // 汇总伏笔：按名称去重，取最早埋设章节
+  const fMap = new Map<string, { name: string; planted: number; hint?: string }>();
+  for (const r of allResults) {
+    for (const f of r.foreshadows || []) {
+      if (!f.name) continue;
+      const ex = fMap.get(f.name);
+      if (!ex || f.planted < ex.planted) {
+        fMap.set(f.name, { name: f.name, planted: f.planted, hint: f.hint || ex?.hint });
+      }
+    }
+  }
+  const foreshadows = [...fMap.values()].slice(0, 30);
+
   // 文风：按块聚合
   const styleProfile: KnowledgeBase['styleProfile'] = allResults.map(r => ({
     chapterRange: r.chapterRange as [number, number],
@@ -211,6 +227,8 @@ export function buildKnowledgeBase(
       event: p.summary,
       involvedCharacters: [],
     })),
+    worldRuleClues,
+    foreshadows,
   };
 }
 
@@ -260,6 +278,25 @@ export async function loadKnowledgeBase(worldId: string): Promise<KnowledgeBase 
       const plot = await loadJsonFile(dir + 'plot.json') || [];
       const styleProfile = await loadJsonFile(dir + 'style.json') || [];
       const worldSettings = await loadJsonFile(dir + 'world.json') || {};
+      // 清洗旧数据：早期版本可能把 AI 返回的对象存进了 worldSettings 字段
+      // 对象 → 提取可读文本（description/rulesList/name），而非 JSON 字符串
+      const ruleToText = (v: any): string => {
+        if (typeof v === 'string') return v;
+        if (Array.isArray(v)) return v.filter((x: any) => typeof x === 'string').join('；');
+        if (v && typeof v === 'object') {
+          const parts: string[] = [];
+          if (typeof v.description === 'string' && v.description) parts.push(v.description);
+          if (Array.isArray(v.rulesList)) parts.push(...v.rulesList.filter((x: any) => typeof x === 'string'));
+          if (typeof v.name === 'string' && v.name && !parts.some((p: string) => p.includes(v.name))) parts.unshift(v.name);
+          return parts.filter(Boolean).join('；');
+        }
+        return '';
+      };
+      for (const k of ['supernatural', 'society', 'culture', 'architecture', 'geography', 'sexualNorms']) {
+        if (typeof worldSettings[k] !== 'string') {
+          worldSettings[k] = ruleToText(worldSettings[k]);
+        }
+      }
       // 从 chapterCount 推断或从 plot 计算
       const maxChapter = plot.length > 0 ? Math.max(...plot.map((p: any) => p.chapter || 0)) + 1 : 1;
       return {
@@ -267,12 +304,15 @@ export async function loadKnowledgeBase(worldId: string): Promise<KnowledgeBase 
         characters: chars, relations, plot,
         worldSettings: worldSettings as KnowledgeBase['worldSettings'],
         styleProfile, globalTimeline: plot.map((p: any) => ({ chapter: p.chapter, time: '', event: p.summary, involvedCharacters: [] })),
+        worldRuleClues: [],
+        foreshadows: (worldSettings as any).foreshadows || [],
       };
     }
     // 回退到旧 index.json
     const raw = await FileSystem.readAsStringAsync(dir + 'index.json');
     return JSON.parse(raw);
-  } catch {
+  } catch (e: any) {
+    console.log('[KB] loadKnowledgeBase failed:', e?.message || String(e));
     return null;
   }
 }

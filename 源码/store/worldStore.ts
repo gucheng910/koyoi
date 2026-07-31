@@ -37,9 +37,8 @@ export const useWorldStore = create<WorldStore>((set, get) => ({
   },
 
   addWorld: async (w) => {
-    const worldId = (w as any)?.id || '';
-    // 用 id 去重，避免同名不同世界互相覆盖
-    const worlds = [...get().customWorlds.filter((x: any) => x.id !== worldId), w];
+    const getName = (x: any) => x?.novelTitle || x?.name || '';
+    const worlds = [...get().customWorlds.filter(x => getName(x) !== getName(w)), w];
     set({ customWorlds: worlds });
     // 只存摘要，大数组走 FileSystem
     const toSave = worlds.map(x => ({

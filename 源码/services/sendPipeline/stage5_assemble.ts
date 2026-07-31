@@ -26,7 +26,138 @@ export interface PromptResult {
   scenarioBlock: string;
 }
 
+/**
+ * 玩家身份提示：魂穿时说明占据身体、原主状态、原著知识
+ */
+function playerIdentityPrompt(session: any): string {
+  const pName = session.selectedCharacters?.[0]?.name || '玩家';
+  let identity = `【玩家身份】${pName}是你正在互动的玩家角色。[说]=玩家角色在说话，[行动]=玩家角色的行为。你扮演除玩家以外的所有角色和旁白。`;
+  const fc = session.fanficConfig;
+  if (fc?.type === 'soul') {
+    const soulStatus = fc.originalSoulStatus === 'coexisting'
+      ? '原主意识仍存在，可能干扰玩家'
+      : fc.originalSoulStatus === 'dormant'
+        ? '原主意识沉睡'
+        : '原主意识已消散';
+    identity += `\n玩家魂穿占据了${pName}的身体（${soulStatus}），拥有${pName}的记忆与处境`;
+    identity += fc.playerAbilities?.plotKnowledge ? '，同时知晓原著剧情走向。' : '，无原著知识。';
+  }
+  return identity;
+}
+
 let activeTuningAdjustments: PromptAdjustment[] = [];
+
+/**
+ * 动态规则系统：按当前章节计算活跃/退化能力
+ * 无 abilities 数据时返回空串（不影响非能力小说）
+ */
+function currentAbilities(world: any, chapter: number, soulName?: string): string {
+  const abilities = world?.abilities;
+  if (!Array.isArray(abilities) || abilities.length === 0) return '';
+  const cur = chapter + 1; // 章节 0-based → 1-based
+  const active = abilities.filter((a: any) => a.start <= cur && (!a.end || a.end >= cur));
+  const degraded = abilities.filter((a: any) => a.end && a.end < cur);
+  const parts: string[] = [];
+  if (active.length > 0) {
+    // 魂穿时以玩家为主体（"你（陈源）的能力"），身穿时第三人称
+    const subject = soulName ? `你（${soulName}）` : '当前角色';
+    parts.push(subject + '的能力：' + active.map((a: any) => a.name + (a.details ? '（' + a.details + '）' : '')).join('；'));
+  }
+  if (degraded.length > 0) {
+    parts.push('已退化能力：' + degraded.map((a: any) => a.name).join('、'));
+  }
+  return parts.length > 0 ? '【能力状态】' + parts.join('。') : '';
+}
+
+/**
+ * 伏笔追踪：注入已埋设未回收的伏笔
+ * 回收检测：已发生剧情的事件摘要包含伏笔名 → 视为回收
+ * 无 foreshadows 数据时返回空串
+ */
+function currentForeshadows(world: any, chapter: number): string {
+  const foreshadows = world?.foreshadows;
+  if (!Array.isArray(foreshadows) || foreshadows.length === 0) return '';
+  const cur = chapter + 1; // 1-based
+
+  // 从已发生剧情中收集已回收的伏笔名
+  const resolvedNames = new Set<string>();
+  const timeline = (world?.timeline || []).filter((t: any) => (t.chapter || 0) <= chapter);
+  for (const ev of timeline) {
+    const desc = ev.description || ev.event || '';
+    for (const f of foreshadows) {
+      if (f.name && desc.includes(f.name)) resolvedNames.add(f.name);
+    }
+  }
+
+  const unresolved = foreshadows
+    .filter(f => f.planted <= cur && !f.resolved && !resolvedNames.has(f.name))
+    .slice(0, 5);
+  if (unresolved.length === 0) return '';
+
+  return '【未回收伏笔】' + unresolved
+    .map(f => f.name + (f.hint ? '（' + f.hint + '）' : ''))
+    .join('；') + '（演绎时可自然呼应，但不要提前揭示）';
+}
+
+/**
+ * 关系里程碑：注入各角色关系发展进度
+ * 达成检测：已发生剧情的事件描述包含 boundEvent → 标记达成
+ * 无 milestones 数据时返回空串
+ */
+function relationshipProgress(world: any, chapter: number): string {
+  const sets = world?.milestones;
+  if (!Array.isArray(sets) || sets.length === 0) return '';
+  const cur = chapter + 1; // 1-based
+  const timeline = (world?.timeline || []).filter((t: any) => (t.chapter || 0) <= chapter);
+
+  const lines: string[] = [];
+  for (const set of sets) {
+    const ms = (set.milestones || []).filter((m: any) => m && m.name);
+    if (ms.length === 0) continue;
+    const achieved = ms.filter((m: any) => {
+      if (m.achieved) return true;
+      return m.boundEvent && timeline.some((ev: any) => {
+        const desc = ev.description || ev.event || '';
+        return desc.includes(m.boundEvent);
+      });
+    });
+    const pending = ms.filter((m: any) => !achieved.includes(m) && (!m.chapter || m.chapter <= cur));
+    const parts: string[] = [`${set.character}：${achieved.length}/${ms.length}`];
+    if (achieved.length > 0) parts.push('已达成：' + achieved.map((m: any) => m.name).join('、'));
+    if (pending.length > 0) parts.push('未达成：' + pending.map((m: any) => m.name).join('、'));
+    lines.push(parts.join('；'));
+  }
+  return lines.length > 0 ? '【关系进度】' + lines.join('。') : '';
+}
+
+/**
+ * 名场面情境匹配：当前章节接近 + 在场角色/场景关键词命中 → 注入原著走向
+ * 魂穿模式下：相关名场面提示玩家可触发/改变
+ */
+function sceneContext(world: any, chapter: number, scene: string, activeChars: string[]): string {
+  const scenes = world?.scenes;
+  if (!Array.isArray(scenes) || scenes.length === 0) return '';
+  const cur = chapter + 1; // 1-based
+
+  const matches = scenes
+    .filter((s: any) => {
+      if (!s.title) return false;
+      const chNear = Math.abs((s.chapter || 0) - cur) <= 25;
+      const kwHit = (s.trigger?.keywords || []).some((k: string) => k && scene.includes(k));
+      // 关键词命中（玩家提及标志物/话语）→ 名场面已发生的任意时刻可作回忆/呼应
+      if (kwHit && (s.chapter || 0) <= cur + 25) return true;
+      // 仅角色在场 → 需名场面即将发生或刚发生（窄窗口）
+      const upcoming = (s.chapter || 0) >= cur - 2;
+      const charHit = (s.trigger?.characters || []).some((c: string) => activeChars.includes(c));
+      return upcoming && charHit && Math.abs((s.chapter || 0) - cur) <= 8;
+    })
+    .slice(0, 2);
+  if (matches.length === 0) return '';
+
+  return '【可关联的名场面】' + matches.map((s: any) =>
+    `「${s.title}」原著走向：${s.originalPlot}（玩家行为可改变此走向，蝴蝶效应自洽即可）`
+  ).join('；');
+}
 
 export async function assemblePrompt(
   session: WorldSession,
@@ -110,8 +241,12 @@ export async function assemblePrompt(
     ? knowledgeToPrompt(session.characterKnowledge, focalChars)
     : '';
 
+  // 魂穿时能力注入以玩家为主体（"你（陈源）的能力"）
+  const fc = (session as any).fanficConfig;
+  const soulName = fc?.type === 'soul' ? session.selectedCharacters[0]?.name : undefined;
+
   const dynamicParts: string[] = [
-    '【玩家身份】' + (session.selectedCharacters.length > 0 ? session.selectedCharacters[0].name : '玩家') + '是你正在互动的玩家角色。[说]=玩家角色在说话，[行动]=玩家角色的行为。你扮演除玩家以外的所有角色和旁白。',
+    playerIdentityPrompt(session),
     '世界观：' + (session.world?.type || '') + ' | ' + (session.world?.rules?.supernatural || ''),
     chapterPrompt,
     summaryRef.current || '',
@@ -119,6 +254,10 @@ export async function assemblePrompt(
     styleFeat,
     tuningBlock,
     relationGraphBlock,
+    currentAbilities(session.world, session.currentChapter || 0, soulName),
+    currentForeshadows(session.world, session.currentChapter || 0),
+    relationshipProgress(session.world, session.currentChapter || 0),
+    sceneContext(session.world, session.currentChapter || 0, session.currentScene || '', session.selectedCharacters.map(c => c.name)),
     '\n场景：' + (session.currentScene || '未知地点'),
     moodCtx,
     knowledgeCtx,
