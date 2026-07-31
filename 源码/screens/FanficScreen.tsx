@@ -150,17 +150,11 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
       if (result.canceled) return;
       const file = result.assets[0];
       setParsingStatus('正在读取追加文件...');
-      // fetch 直接读原始字节（v2.17.0 方式），content:// 复制到缓存后走 file://
-      let readUri = file.uri;
-      if (readUri.startsWith('content://')) {
-        setParsingStatus('正在复制文件...');
-        const cachedUri = (FileSystem.cacheDirectory || FileSystem.documentDirectory) + 'novel_app_' + Date.now() + '.txt';
-        await FileSystem.copyAsync({ from: readUri, to: cachedUri });
-        readUri = cachedUri;
-      }
-      const readTimeout = new Promise<Uint8Array>((_, reject) => setTimeout(() => reject(new Error('读取超时')), 15000));
+      // v2.17.0 方式：直接 fetch(file.uri)，不复制缓存，保证字节完整
+      // 加超时兜底，防止部分机型上 fetch 永久挂起
+      const readTimeout = new Promise<Uint8Array>((_, reject) => setTimeout(() => reject(new Error('读取超时，请重试')), 15000));
       const rawBytes = await Promise.race([
-        fetch(readUri).then(r => r.arrayBuffer()).then(buf => new Uint8Array(buf)),
+        fetch(file.uri).then(r => r.arrayBuffer()).then(buf => new Uint8Array(buf)),
         readTimeout,
       ]);
       const content = normalizeEncoding(rawBytes);
@@ -266,20 +260,11 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
       if (result.canceled) { setProcessing(false); setParsingStatus(''); return; }
       const file = result.assets[0];
       setParsingStatus('正在读取追加文件...');
-      // 用 fetch 直接读原始字节（v2.17.0 方式，速度快且不乱码）
-      // content:// 复制到缓存后是 file://，fetch 同样可读
-      let readUri = file.uri;
-      if (readUri.startsWith('content://')) {
-        setParsingStatus('正在复制文件...');
-        const cachedUri = (FileSystem.cacheDirectory || FileSystem.documentDirectory) + 'novel_append_' + Date.now() + '.txt';
-        await FileSystem.copyAsync({ from: readUri, to: cachedUri });
-        readUri = cachedUri;
-      }
+      // v2.17.0 方式：直接 fetch(file.uri)，不复制缓存，保证字节完整
       // 加超时兜底，防止部分机型上 fetch 永久挂起
-      setParsingStatus('正在读取文件...');
-      const readTimeout = new Promise<Uint8Array>((_, reject) => setTimeout(() => reject(new Error('读取超时')), 15000));
+      const readTimeout = new Promise<Uint8Array>((_, reject) => setTimeout(() => reject(new Error('读取超时，请重试')), 15000));
       const rawBytes = await Promise.race([
-        fetch(readUri).then(r => r.arrayBuffer()).then(buf => new Uint8Array(buf)),
+        fetch(file.uri).then(r => r.arrayBuffer()).then(buf => new Uint8Array(buf)),
         readTimeout,
       ]);
       setParsingStatus('正在解析编码...');
