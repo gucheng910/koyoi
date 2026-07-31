@@ -79,14 +79,14 @@ export function detectChapters(text: string): ChapterMeta[] {
     return fallbackSplit(text);
   }
 
-  // 过滤：保留前面有空行、文件开头、或前面只有空白/标点的标记
+  // 过滤：保留真正位于行首的章节标记（标记前是换行或文件开头）
   const validMarkers = markers.filter(m => {
     if (m.pos === 0) return true;
-    if (m.pos <= 15) return true;
     const before = text.slice(Math.max(0, m.pos - 12), m.pos);
-    // 前12字内有换行或前面纯空白 → 视为有效行首标记
-    const trimmedBefore = before.replace(/[\s \t\u3000\u00A0]+$/, "");
-    if (trimmedBefore && /[\n\r]/.test(trimmedBefore.slice(-3))) return true;
+    // 有效：标记前有换行（容忍换行后的空格/全角空格缩进）
+    if (/[\n\r][ \t\u3000]*$/.test(before)) return true;
+    // 有效：标记前是文件开头（前 12 字内全空白或为空）
+    if (/^[\s\u3000]*$/.test(before)) return true;
     return false;
   });
 
