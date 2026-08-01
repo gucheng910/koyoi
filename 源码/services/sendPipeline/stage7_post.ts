@@ -10,6 +10,8 @@ import type { ApiConfig } from '../../types';
 export interface PostProcessResult {
   displayText: string;
   newNpcs?: Array<{ name: string; role: string; personality: string; currentStatus: string; goal: string }>;
+  /** 场景转变（AI 通过 ___META___ {"scene":"..."} 上报） */
+  scene?: string;
 }
 
 export async function postProcessResponse(
@@ -34,10 +36,14 @@ export async function postProcessResponse(
 
   const metaMatch = raw.match(/___META___\s*(\{[\s\S]*\})/);
   const newNpcs: PostProcessResult['newNpcs'] = [];
+  let scene: string | undefined;
   if (metaMatch) {
     try {
       const meta = JSON.parse(metaMatch[1]);
       displayText = raw.replace(/___META___[\s\S]*$/, '').trim();
+      if (typeof meta.scene === 'string' && meta.scene.trim()) {
+        scene = meta.scene.trim().slice(0, 40);
+      }
       if (meta.newCharacter && typeof meta.newCharacter === 'string') {
         const name = meta.newCharacter;
         const inScene = session.selectedCharacters.some(c => c.name === name)
@@ -54,5 +60,5 @@ export async function postProcessResponse(
     } catch {}
   }
 
-  return { displayText, newNpcs: newNpcs.length > 0 ? newNpcs : undefined };
+  return { displayText, newNpcs: newNpcs.length > 0 ? newNpcs : undefined, scene };
 }

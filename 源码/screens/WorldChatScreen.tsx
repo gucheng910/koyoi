@@ -246,7 +246,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
 
       if (raw) {
         // 阶段 7: 响应后处理
-        const { displayText, newNpcs } = await postProcessResponse(raw, session, cfg, chapterCtx, activeChars);
+        const { displayText, newNpcs, scene } = await postProcessResponse(raw, session, cfg, chapterCtx, activeChars);
         if (newNpcs) {
           for (const npc of newNpcs) {
             setSession(prev => ({
@@ -256,6 +256,15 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
             }));
             if (!activeChars.current.includes(npc.name)) activeChars.current.push(npc.name);
           }
+        }
+        // 场景转变：AI 上报的新场景写回 session（消除场景粘滞）
+        if (scene) {
+          setSession(prev => ({ ...prev, currentScene: scene }));
+          console.log('[SCENE] -> ' + scene);
+        } else if (routerDecision?.sceneHint) {
+          // flash 常不遵守 META 上报，路由器场景建议作为兜底
+          setSession(prev => ({ ...prev, currentScene: routerDecision.sceneHint as string }));
+          console.log('[SCENE] router -> ' + routerDecision.sceneHint);
         }
 
         const msg: ChatMessage = { role: 'assistant', content: displayText || raw, timestamp: new Date().toISOString() };

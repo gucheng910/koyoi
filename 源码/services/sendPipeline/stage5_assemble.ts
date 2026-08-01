@@ -420,6 +420,7 @@ export async function assemblePrompt(
   }
 
   dynamicParts.push('\n【角色引入】需要引入原著新角色时，在回复末尾添加 ___META___ {"newCharacter":"角色名"}');
+  dynamicParts.push('【场景】场景发生转变时（如从教室走到广播台），在回复末尾添加 ___META___ {"scene":"新场景名称"}；场景未转变则不添加');
 
   const dynamicSystem = dynamicParts.filter(p => p && p.trim().length > 0).join('\n');
 
