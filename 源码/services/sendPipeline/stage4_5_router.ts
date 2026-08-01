@@ -271,12 +271,13 @@ export async function routeContent(
         { role: 'user', content: input },
       ],
       { temperature: 0.2, maxTokens: 600 }
-    );
+    ).catch(() => null);
 
     if (!raw) return null;
     const match = raw.match(/\{[\s\S]*\}/);
     if (!match) return null;
-    const parsed = JSON.parse(match[0]);
+    let parsed: any;
+    try { parsed = JSON.parse(match[0]); } catch { return null; }
 
     // 字段校验 + 默认值
     const validIds = new Set([
