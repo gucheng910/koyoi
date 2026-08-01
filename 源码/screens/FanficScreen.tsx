@@ -597,6 +597,12 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
       worldConvergence.push('', '## 入口章节原文（供场景参考）', entryChapterText);
     }
 
+    // 世界原著角色名单：防止开场凭空捏造原著没有的新角色（如把"周宇的兄弟"造出一个唐建）
+    const knownNames = (worldCard.characters || []).map((c: any) => c.name).filter(Boolean);
+    if (knownNames.length > 0) {
+      worldConvergence.push('', '## 世界原著角色名单（仅此名单内的角色可以出场）', knownNames.join('、'));
+    }
+
     // ===== Step 2: 基于收敛世界生成开场 =====
     setParsingStatus('正在生成开场场景...');
 
@@ -618,7 +624,7 @@ ${isSoul ? '- 魂穿：写出意识进入新身体的错位感。你发现自己
 - ${plotKnowledge ? '因为你知道剧情，你的内心活动可以包含"接下来本应…"的预感' : '你对一切感到陌生，只能凭借眼前的信息判断局势'}
 - 结尾留悬念。不要总结。
 
-3. npcs（1-4个）：初始在场的角色 {name, role, personality, currentStatus}
+3. npcs（1-4个）：初始在场的角色 {name, role, personality, currentStatus}。**只能从【世界原著角色名单】中选择，禁止创造名单之外的新角色**；名单里没有合适角色时 npcs 可以为空
 4. worldState：从穿越者视角看，当前世界的一句话局势
 
 只返回JSON：{"worldBible":"...","scene":"...","npcs":[...],"worldState":"..."}`

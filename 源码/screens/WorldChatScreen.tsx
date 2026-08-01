@@ -381,7 +381,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
         </View>
       )}
       {error ? <View style={{ padding: 10, backgroundColor: '#3a1010' }}><Text style={{ color: '#ff6b6b', fontSize: 13 }}>{error}</Text><TouchableOpacity onPress={() => setError(null)}><Text style={{ color: '#ff6b6b' }}> ✕</Text></TouchableOpacity></View> : null}
-      <FlatList ref={flatListRef} data={displayMsgs} renderItem={renderMsg} keyExtractor={(_, i) => String(i)} contentContainerStyle={st.messageList} onScroll={handleScroll} scrollEventThrottle={100} onContentSizeChange={scrollToBottom} />
+      <FlatList ref={flatListRef} data={displayMsgs} renderItem={renderMsg} keyExtractor={(_, i) => String(i)} contentContainerStyle={st.messageList} onScroll={handleScroll} scrollEventThrottle={100} onContentSizeChange={() => { if (isNearBottom.current) scrollToBottom(); }} />
       {segments.length > 0 && (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingTop: 4, gap: 4 }}>
           {segments.map((seg, i) => (

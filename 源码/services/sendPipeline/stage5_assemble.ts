@@ -288,6 +288,10 @@ export async function assemblePrompt(
   const selectIds = routerDecision ? routerDecision.select : undefined;
   const focusSet = new Set(routerDecision?.focusChars || []);
 
+  // 场景：路由器给出转场建议（sceneHint）时优先使用——玩家说"进教室"这轮就切换到新场景，
+  // 避免"说了进教室但AI还在旧场景里吃包子"的转场滞后
+  const sceneLabel = routerDecision?.sceneHint || session.currentScene || '未知地点';
+
   const dynamicParts: string[] = [
     playerIdentityPrompt(session),
     onStageBlock,
@@ -302,7 +306,7 @@ export async function assemblePrompt(
     currentForeshadows(session.world, session.currentChapter || 0, selectIds),
     relationshipProgress(session.world, session.currentChapter || 0, selectIds),
     sceneContext(session.world, session.currentChapter || 0, session.currentScene || '', session.selectedCharacters.map(c => c.name), selectIds),
-    '\n场景：' + (session.currentScene || '未知地点'),
+    '\n场景：' + sceneLabel,
     moodCtx,
     knowledgeCtx,
   ];
@@ -434,7 +438,7 @@ export async function assemblePrompt(
     if (dirText) dynamicParts.push(dirText);
   }
 
-  dynamicParts.push('\n【角色引入】需要引入原著新角色时，在回复末尾添加 ___META___ {"newCharacter":"角色名"}');
+  dynamicParts.push('\n【角色引入】需要引入新角色时，只使用【世界角色】中的原著角色（关键角色档案里列出的），在回复末尾添加 ___META___ {"newCharacter":"角色名"}；原著不存在的角色禁止创造');
   dynamicParts.push('【场景】场景发生转变时（如从教室走到广播台），在回复末尾添加 ___META___ {"scene":"新场景名称"}；场景未转变则不添加');
 
   const dynamicSystem = dynamicParts.filter(p => p && p.trim().length > 0).join('\n');
