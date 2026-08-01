@@ -51,3 +51,6 @@ Desktop/
 # Temp
 *.log
 npm-debug.log*
+
+dist-android/
+android/app/src/main/assets/
