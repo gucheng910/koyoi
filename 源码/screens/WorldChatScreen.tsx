@@ -23,6 +23,7 @@ import { enhanceWithScenario } from '../services/scenarioInjector';
 import { generateBackgroundInteraction, applyBackgroundInteraction } from '../services/backgroundInteraction';
 import { WORLD_RULES, NARRATOR_BASE, NARRATOR_FANFIC_APPEND, VOCAB_LOCK, POST_HISTORY_BASE } from '../prompts/worldRules';
 import { processInput, maybeGenerateSummary, buildContext, runCharacterSimulation, assemblePrompt, callAI, postProcessResponse, runPostSendHooks } from '../services/sendPipeline';
+import { routeContent } from '../services/sendPipeline/stage4_5_router';
 import { recordFeedback as rf } from '../services/feedbackStore';
 import { SAFE_TOP } from '../theme/safeArea';
 import { useSafeBottom } from '../theme/useSafeBottom';
@@ -227,14 +228,18 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
       // 阶段 3: 上下文构建
       const { chapterCtx, isFanfic, worldInfo } = await buildContext(session, finalText, messages, turnCount.current);
 
-      // 阶段 4: 角色推演
+      // 阶段 4: 角色推演 + 内容路由器（并行，互不依赖）
       const hasRounds = turnCount.current >= 2;
-      const charActions = hasRounds
-        ? await runCharacterSimulation(session, cfg, chapterCtx, isFanfic, turnCount.current, activeChars, lastSimResults, attitudes)
-        : [];
+      const recentText = msgsWithUser.filter(m => m.role === 'user' || m.role === 'assistant').slice(-4).map(m => m.content).join(' ');
+      const [charActions, routerDecision] = await Promise.all([
+        hasRounds
+          ? runCharacterSimulation(session, cfg, chapterCtx, isFanfic, turnCount.current, activeChars, lastSimResults, attitudes)
+          : Promise.resolve([] as CharacterAction[]),
+        routeContent(cfg, session, msgsWithUser, recentText),
+      ]);
 
       // 阶段 5: 提示词组装
-      const { prompt } = await assemblePrompt(session, msgsWithUser, messages, charActions, chapterCtx, isFanfic, cfg, summaryRef, attitudes);
+      const { prompt } = await assemblePrompt(session, msgsWithUser, messages, charActions, chapterCtx, isFanfic, cfg, summaryRef, attitudes, routerDecision);
 
       // 阶段 6: API 调用
       const raw = await callAI(cfg, prompt, setStreamingText);

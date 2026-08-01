@@ -13,6 +13,9 @@ export type { ContextResult } from './stage3_context';
 
 export { runCharacterSimulation } from './stage4_simulation';
 
+export { routeContent } from './stage4_5_router';
+export type { RouterDecision } from './stage4_5_router';
+
 export { assemblePrompt } from './stage5_assemble';
 export type { PromptResult } from './stage5_assemble';
 

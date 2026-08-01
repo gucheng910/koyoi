@@ -15,8 +15,6 @@ import { KnowledgeGraph } from '../knowledgeGraph';
 import { decayMoods, updateMoods } from '../emotionalInertia';
 import { generateWorldPulse } from '../worldClock';
 import { extractNotableEvents, propagateRumors } from '../rumorPropagation';
-import { consultDirector } from '../narrativeDirector';
-import type { DirectorDecision } from '../narrativeDirector';
 import type { WorldSession, ChatMessage } from '../../types';
 import type { CharacterAction } from '../characterSimulator';
 
@@ -99,16 +97,7 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
     saveSession(updated);
   }
 
-  // 叙事导演：每 5 轮评估节奏
-  if (turnCount.current % 5 === 0) {
-    consultDirector(session, updated, turnCount.current, session.currentChapter || 0).then(dir => {
-      if (dir) {
-        (session as any).directorDecision = dir;
-        setSession(prev => ({ ...prev, directorDecision: dir as any }));
-        console.log('[DIRECTOR] pacing=' + dir.pacing + ' focus=' + dir.suggestedFocus.slice(0, 30));
-      }
-    }).catch(() => {});
-  }
+  // 叙事导演已并入内容路由器（每轮输出 tone/intent/sceneHint），此处不再独立调用
 
   if (turnCount.current % 3 === 0 && session.worldNovelId) {
     const cfg = useConfigStore.getState().getActiveConfig();

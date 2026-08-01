@@ -6,6 +6,8 @@ import React from 'react';
 import { NARRATOR_BASE, NARRATOR_FANFIC_APPEND, VOCAB_LOCK, POST_HISTORY_BASE, WORLD_RULES, ANTI_AI_PATTERN } from '../../prompts/worldRules';
 import { contextToPrompt } from '../dialogueContext';
 import { selectMemoriesForPrompt } from '../memoryManager';
+import { routerToPrompt } from './stage4_5_router';
+import type { RouterDecision } from './stage4_5_router';
 import { loadKnowledgeBaseCached as loadKnowledgeBase } from '../knowledgeBase';
 import { getKnowledgeGraph } from '../knowledgeGraph';
 import { getRecentBadFeedback, getGoodSamples } from '../feedbackStore';
@@ -52,17 +54,19 @@ let activeTuningAdjustments: PromptAdjustment[] = [];
  * 动态规则系统：按当前章节计算活跃/退化能力
  * 无 abilities 数据时返回空串（不影响非能力小说）
  */
-function currentAbilities(world: any, chapter: number, soulName?: string): string {
+function currentAbilities(world: any, chapter: number, soulName?: string, selectIds?: string[]): string {
   const abilities = world?.abilities;
   if (!Array.isArray(abilities) || abilities.length === 0) return '';
   const cur = chapter + 1; // 章节 0-based → 1-based
   const active = abilities.filter((a: any) => a.start <= cur && (!a.end || a.end >= cur));
   const degraded = abilities.filter((a: any) => a.end && a.end < cur);
+  // 路由器选择过滤：selectIds 为 undefined 时全量（兜底），为数组时按 id 筛选（可能选空）
+  const want = (id: string) => !selectIds || selectIds.includes(id);
   const parts: string[] = [];
   if (active.length > 0) {
     // 魂穿目标拥有的能力 → "你（X）"；其他角色的能力 → 第三人称（能力归属不随魂穿转移）
-    const mine = soulName ? active.filter((a: any) => !a.owner || a.owner === soulName) : [];
-    const npc = active.filter((a: any) => !mine.includes(a));
+    const mine = soulName ? active.filter((a: any) => !a.owner || a.owner === soulName).filter((a: any) => want('ability:' + a.name)) : [];
+    const npc = active.filter((a: any) => !mine.includes(a)).filter((a: any) => want('ability:' + a.name));
     if (mine.length > 0) {
       parts.push(`你（${soulName}）的能力：` + mine.map((a: any) => a.name + (a.details ? '（' + a.details + '）' : '')).join('；'));
     }
@@ -77,7 +81,8 @@ function currentAbilities(world: any, chapter: number, soulName?: string): strin
     }
   }
   if (degraded.length > 0) {
-    parts.push('已退化能力：' + degraded.map((a: any) => a.name).join('、'));
+    const deg = degraded.filter((a: any) => want('ability:' + a.name));
+    if (deg.length > 0) parts.push('已退化能力：' + deg.map((a: any) => a.name).join('、'));
   }
   return parts.length > 0 ? '【能力状态】' + parts.join('。') : '';
 }
@@ -87,7 +92,7 @@ function currentAbilities(world: any, chapter: number, soulName?: string): strin
  * 回收检测：已发生剧情的事件摘要包含伏笔名 → 视为回收
  * 无 foreshadows 数据时返回空串
  */
-function currentForeshadows(world: any, chapter: number): string {
+function currentForeshadows(world: any, chapter: number, selectIds?: string[]): string {
   const foreshadows = world?.foreshadows;
   if (!Array.isArray(foreshadows) || foreshadows.length === 0) return '';
   const cur = chapter + 1; // 1-based
@@ -106,6 +111,7 @@ function currentForeshadows(world: any, chapter: number): string {
 
   const unresolved = foreshadows
     .filter(f => f.planted <= cur && !f.resolved && !resolvedNames.has(f.name))
+    .filter(f => !selectIds || selectIds.includes('foreshadow:' + f.name))
     .slice(0, 5);
   if (unresolved.length === 0) return '';
 
@@ -119,7 +125,7 @@ function currentForeshadows(world: any, chapter: number): string {
  * 达成检测：已发生剧情的事件描述包含 boundEvent → 标记达成
  * 无 milestones 数据时返回空串
  */
-function relationshipProgress(world: any, chapter: number): string {
+function relationshipProgress(world: any, chapter: number, selectIds?: string[]): string {
   const sets = world?.milestones;
   if (!Array.isArray(sets) || sets.length === 0) return '';
   const cur = chapter + 1; // 1-based
@@ -127,6 +133,7 @@ function relationshipProgress(world: any, chapter: number): string {
 
   const lines: string[] = [];
   for (const set of sets) {
+    if (selectIds && !selectIds.includes('milestone:' + set.character)) continue;
     const ms = (set.milestones || []).filter((m: any) => m && m.name);
     if (ms.length === 0) continue;
     const achieved = ms.filter((m: any) => {
@@ -149,12 +156,12 @@ function relationshipProgress(world: any, chapter: number): string {
  * 名场面情境匹配：当前章节接近 + 在场角色/场景关键词命中 → 注入原著走向
  * 魂穿模式下：相关名场面提示玩家可触发/改变
  */
-function sceneContext(world: any, chapter: number, scene: string, activeChars: string[]): string {
+function sceneContext(world: any, chapter: number, scene: string, activeChars: string[], selectIds?: string[]): string {
   const scenes = world?.scenes;
   if (!Array.isArray(scenes) || scenes.length === 0) return '';
   const cur = chapter + 1; // 1-based
 
-  const matches = scenes
+  let matches = scenes
     .filter((s: any) => {
       if (!s.title) return false;
       const chNear = Math.abs((s.chapter || 0) - cur) <= 25;
@@ -166,7 +173,8 @@ function sceneContext(world: any, chapter: number, scene: string, activeChars: s
       const charHit = (s.trigger?.characters || []).some((c: string) => activeChars.includes(c));
       return upcoming && charHit && Math.abs((s.chapter || 0) - cur) <= 8;
     })
-    .slice(0, 2);
+    .slice(0, 4);
+  if (selectIds) matches = matches.filter(s => selectIds.includes('scene:' + s.title));
   if (matches.length === 0) return '';
 
   return '【可关联的名场面】' + matches.map((s: any) =>
@@ -183,7 +191,8 @@ export async function assemblePrompt(
   isFanfic: boolean,
   cfg: ApiConfig,
   summaryRef: React.MutableRefObject<string>,
-  attitudes: React.MutableRefObject<Record<string, any>>
+  attitudes: React.MutableRefObject<Record<string, any>>,
+  routerDecision?: RouterDecision | null
 ): Promise<PromptResult> {
   console.log('[PIPELINE] stage5 assemble start promptMsgs=' + msgsWithUser.length);
   const fanficAppend = isFanfic ? NARRATOR_FANFIC_APPEND : '';
@@ -261,6 +270,10 @@ export async function assemblePrompt(
   const fc = (session as any).fanficConfig;
   const soulName = fc?.type === 'soul' ? session.selectedCharacters[0]?.name : undefined;
 
+  // 路由器选择：undefined=路由器失败/未启用 → 全量注入（兜底）；数组=按选择注入
+  const selectIds = routerDecision ? routerDecision.select : undefined;
+  const focusSet = new Set(routerDecision?.focusChars || []);
+
   const dynamicParts: string[] = [
     playerIdentityPrompt(session),
     '世界观：' + (session.world?.type || '') + ' | ' + (session.world?.rules?.supernatural || ''),
@@ -270,14 +283,18 @@ export async function assemblePrompt(
     styleFeat,
     tuningBlock,
     relationGraphBlock,
-    currentAbilities(session.world, session.currentChapter || 0, soulName),
-    currentForeshadows(session.world, session.currentChapter || 0),
-    relationshipProgress(session.world, session.currentChapter || 0),
-    sceneContext(session.world, session.currentChapter || 0, session.currentScene || '', session.selectedCharacters.map(c => c.name)),
+    currentAbilities(session.world, session.currentChapter || 0, soulName, selectIds),
+    currentForeshadows(session.world, session.currentChapter || 0, selectIds),
+    relationshipProgress(session.world, session.currentChapter || 0, selectIds),
+    sceneContext(session.world, session.currentChapter || 0, session.currentScene || '', session.selectedCharacters.map(c => c.name), selectIds),
     '\n场景：' + (session.currentScene || '未知地点'),
     moodCtx,
     knowledgeCtx,
   ];
+
+  // 路由器叙事方向（意图/基调/场景线索）
+  const routerBlock = routerToPrompt(routerDecision);
+  if (routerBlock) dynamicParts.push(routerBlock);
 
   // ═══════════════════════════════════════════════════════
   // 知识边界 Gate — 同人模式下硬约束角色知识范围
@@ -302,8 +319,39 @@ export async function assemblePrompt(
     dynamicParts.push('\n【原著关键角色档案（这些角色的身份/学校/位置以此为准，不得混淆）】\n' + keyRoster);
   }
 
+  // 路由器补充：玩家提及但不在场的角色 → 注入完整档案（防身份/位置幻觉）
+  if (routerDecision && routerDecision.extraChars.length > 0) {
+    const extraLines = routerDecision.extraChars
+      .map(name => worldChars.find((c: any) => c.name === name))
+      .filter((c: any) => c && c.name)
+      .map((c: any) => `- ${c.name}：${c.role || '未知身份'} | 性格：${(c.personality?.traits || []).slice(0, 3).join('、') || '未知'}${c.relationship?.status ? ' | 与玩家：' + c.relationship.status : ''}${c.personality?._deepProfile ? ' | ' + String(c.personality._deepProfile).slice(0, 80) : ''}`);
+    if (extraLines.length > 0) {
+      dynamicParts.push('\n【本轮相关角色档案（该角色不在场但被玩家提及，其身份/学校/位置以此为准）】\n' + extraLines.join('\n'));
+    }
+  }
+
+  // 路由器补充：玩家提及的其他章节 → 注入该章原著事件（避免 AI 瞎编旧章剧情）
+  if (routerDecision && routerDecision.chapterRefs.length > 0 && isFanfic && session.worldNovelId) {
+    try {
+      const kb = await loadKnowledgeBase(session.worldNovelId);
+      if (kb) {
+        const evLines = routerDecision.chapterRefs
+          .map((ch: number) => kb.globalTimeline
+            .filter((e: any) => (e.chapter || 0) + 1 === ch)
+            .slice(0, 2)
+            .map((e: any) => `第${ch}章：${e.event}`)
+            .join('\n'))
+          .filter(Boolean);
+        if (evLines.length > 0) {
+          dynamicParts.push('\n【玩家提及的章节事件（原著，以此为准）】\n' + evLines.join('\n'));
+        }
+      }
+    } catch {}
+  }
+
   for (const c of session.selectedCharacters) {
-    const deep = c.personality._deepProfile || '';
+    // 焦点角色（路由器指定）注入完整深度画像，非焦点角色省略 deepProfile（减负）
+    const deep = focusSet.has(c.name) ? c.personality._deepProfile || '' : '';
     const dialogue = (c.exampleDialogues || []).slice(0, 2).map((d: any) => d.character).join(' / ');
     let line = '- ' + c.name + '：' + c.personality.traits.join('、') + '，' + c.relationship.status;
     const att = attitudes.current[c.name];
@@ -375,11 +423,16 @@ export async function assemblePrompt(
 
   const dynamicSystem = dynamicParts.filter(p => p && p.trim().length > 0).join('\n');
 
-  // 对话历史：只保留最近 16 条，更早的内容由 summaryRef 摘要补偿
-  // （历史全量注入会让 prompt 随对话无限膨胀，flash 长 prompt 下质量急剧下降）
+  // 对话历史：默认保留最近 16 条；路由器指定时按相关轮次保留（保底最近 4 条）
   const HISTORY_LIMIT = 16;
   let historyMsgs = msgsWithUser.slice(1);
-  if (historyMsgs.length > HISTORY_LIMIT) {
+  if (routerDecision && routerDecision.historyKeep.length > 0) {
+    const keepIdx = new Set<number>(routerDecision.historyKeep);
+    const lastIdx = historyMsgs.length - 1;
+    for (let i = Math.max(0, lastIdx - 3); i <= lastIdx; i++) keepIdx.add(i);
+    const kept = historyMsgs.filter((_, i) => keepIdx.has(i)).slice(-12);
+    historyMsgs = kept.length >= 3 ? kept : historyMsgs.slice(-HISTORY_LIMIT);
+  } else if (historyMsgs.length > HISTORY_LIMIT) {
     historyMsgs = historyMsgs.slice(-HISTORY_LIMIT);
   }
 
