@@ -192,7 +192,8 @@ export async function assemblePrompt(
   cfg: ApiConfig,
   summaryRef: React.MutableRefObject<string>,
   attitudes: React.MutableRefObject<Record<string, any>>,
-  routerDecision?: RouterDecision | null
+  routerDecision?: RouterDecision | null,
+  activeChars?: string[]
 ): Promise<PromptResult> {
   console.log('[PIPELINE] stage5 assemble start promptMsgs=' + msgsWithUser.length);
   const fanficAppend = isFanfic ? NARRATOR_FANFIC_APPEND : '';
@@ -270,12 +271,26 @@ export async function assemblePrompt(
   const fc = (session as any).fanficConfig;
   const soulName = fc?.type === 'soul' ? session.selectedCharacters[0]?.name : undefined;
 
+  // 在场者物理锚定：防止多角色场景动作对象写错（如"何思娇拍陈源肩膀"实为玩家）
+  // activeChars 为运行时在场名单（stage4 维护），缺失时用在场角色卡兜底
+  const onStage = activeChars && activeChars.length > 0
+    ? activeChars
+    : session.selectedCharacters.map(c => c.name);
+  const playerName = session.selectedCharacters[0]?.name || '玩家';
+  const onStageBlock = [
+    '【当前在场者（物理位置锚定）】',
+    `- 玩家：${playerName}（你）`,
+    ...onStage.filter(n => n !== playerName).map(n => `- ${n}：在场`),
+    '动作规则：其他角色对"你"做动作（拍肩/拉手/说话等）一律用"你"或"' + playerName + '"，禁止错写成其他在场角色名；角色名只用于该角色自己的动作和对话。',
+  ].join('\n');
+
   // 路由器选择：undefined=路由器失败/未启用 → 全量注入（兜底）；数组=按选择注入
   const selectIds = routerDecision ? routerDecision.select : undefined;
   const focusSet = new Set(routerDecision?.focusChars || []);
 
   const dynamicParts: string[] = [
     playerIdentityPrompt(session),
+    onStageBlock,
     '世界观：' + (session.world?.type || '') + ' | ' + (session.world?.rules?.supernatural || ''),
     chapterPrompt,
     summaryRef.current || '',
@@ -431,6 +446,8 @@ export async function assemblePrompt(
     const keepIdx = new Set<number>(routerDecision.historyKeep);
     const lastIdx = historyMsgs.length - 1;
     for (let i = Math.max(0, lastIdx - 3); i <= lastIdx; i++) keepIdx.add(i);
+    // 早期稀疏抽样：每 5 轮取 1 条早期轮次，防止早期支线（角色登场/关系建立）被完全裁掉
+    for (let i = 0; i < lastIdx - 3; i += 5) keepIdx.add(i);
     const kept = historyMsgs.filter((_, i) => keepIdx.has(i)).slice(-12);
     historyMsgs = kept.length >= 3 ? kept : historyMsgs.slice(-HISTORY_LIMIT);
   } else if (historyMsgs.length > HISTORY_LIMIT) {

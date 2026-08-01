@@ -239,7 +239,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
       ]);
 
       // 阶段 5: 提示词组装
-      const { prompt } = await assemblePrompt(session, msgsWithUser, messages, charActions, chapterCtx, isFanfic, cfg, summaryRef, attitudes, routerDecision);
+      const { prompt } = await assemblePrompt(session, msgsWithUser, messages, charActions, chapterCtx, isFanfic, cfg, summaryRef, attitudes, routerDecision, activeChars.current);
 
       // 阶段 6: API 调用
       const raw = await callAI(cfg, prompt, setStreamingText);

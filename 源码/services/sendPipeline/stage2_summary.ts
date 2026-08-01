@@ -19,7 +19,7 @@ export function maybeGenerateSummary(
   if (oldMsgs.length <= 10) return;
 
   const sp = [
-    { role: 'system' as const, content: '将对话压缩为摘要。事件/关系/情感各30字内。' },
+    { role: 'system' as const, content: '将对话压缩为摘要。要求：1) 事件/关系/情感各30字内；2) 必须记录新增角色及玩家与他们的关系进展（如"周芙：新同桌，约了看球"）；3) 已发生的约定、承诺、未完成事项必须保留。' },
     { role: 'user' as const, content: oldMsgs.map(m => (m.role === 'user' ? '玩家' : '') + ':' + m.content.slice(0, 150)).join('\n').slice(0, 8000) },
   ];
   chatCompletionSync({ ...cfg, thinkingMode: 'disabled' }, sp, { maxTokens: 300, temperature: 0.2 })
