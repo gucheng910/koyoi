@@ -10,11 +10,23 @@ const USAGE_KEY = '@koyoi_usage';
 
 // DeepSeek V4 官方定价 (RMB/1M tokens)
 // 来源: https://api-docs.deepseek.com/zh-cn/quick_start/pricing
-// Pro 2.5折将于 2026/5/31 后永久生效
+// Pro 2.5折将于 2026/5/31 后永久生效（3/6元即为永久价）
 const PRICING: Record<string, { input: number; cached: number; output: number }> = {
   'deepseek-v4-flash': { input: 1.0, cached: 0.02, output: 2.0 },
   'deepseek-v4-pro':   { input: 3.0, cached: 0.025, output: 6.0 },
 };
+
+/**
+ * 按模型名模糊匹配定价：灰度/带版本号的模型名（如 deepseek-v4-pro-0731）
+ * 也能正确匹配，避免精确匹配失败后回退 flash 价导致 pro 费用低估
+ */
+function pricingFor(model: string) {
+  if (!model) return PRICING['deepseek-v4-flash'];
+  const m = model.toLowerCase();
+  if (m.includes('pro')) return PRICING['deepseek-v4-pro'];
+  if (m.includes('flash')) return PRICING['deepseek-v4-flash'];
+  return PRICING['deepseek-v4-flash'];
+}
 
 export interface DailyUsage {
   date: string;          // YYYY-MM-DD
@@ -76,7 +88,7 @@ function calcCost(model: string, inputTokens: number, outputTokens: number, cach
   // 仅 DeepSeek 官方 API 计算 RMB，其他提供商只记 token
   const isOfficial = !baseUrl || baseUrl.includes('api.deepseek.com');
   if (!isOfficial) return { inputCostRmb: 0, outputCostRmb: 0, totalCostRmb: 0 };
-  const p = PRICING[model] || PRICING['deepseek-v4-flash'];
+  const p = pricingFor(model);
   const inputMissCost = (cacheMissTokens / 1_000_000) * p.input;
   const inputHitCost = (cacheHitTokens / 1_000_000) * p.cached;
   const outputCost = (outputTokens / 1_000_000) * p.output;
@@ -178,7 +190,9 @@ export const useUsageStore = create<UsageState>((set, get) => ({
 
     set({ usage: newUsage, _pendingSave: newUsage });
 
-    // 延迟写入，合并短时间内的多次调用
+    // 立即写盘（fire-and-forget）：防止调用频繁时防抖 timer 一直被重置，app 被杀时用量丢失
+    AsyncStorage.setItem(USAGE_KEY, JSON.stringify(newUsage)).catch(() => {});
+    // 防抖兜底：确保最终状态落盘
     clearTimeout((get() as any)._saveTimer);
     (get() as any)._saveTimer = setTimeout(() => {
       const pending = get()._pendingSave;
@@ -186,7 +200,7 @@ export const useUsageStore = create<UsageState>((set, get) => ({
         AsyncStorage.setItem(USAGE_KEY, JSON.stringify(pending)).catch(() => {});
         set({ _pendingSave: null });
       }
-    }, 2000);
+    }, 5000);
   },
 
   reset: async () => {

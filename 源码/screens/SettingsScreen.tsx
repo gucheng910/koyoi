@@ -11,6 +11,7 @@ import { REWARD_IMAGE_URI } from '../theme/rewardImage';
 import { useConfigStore } from '../store/configStore';
 import { usePersonaStore } from '../store/personaStore';
 import { useUsageStore } from '../store/usageStore';
+import Constants from 'expo-constants';
 import { getCacheMetrics } from '../api/deepseek';
 import * as SecureStore from 'expo-secure-store';
 import type { ApiConfig } from '../types';
@@ -110,7 +111,7 @@ function MainPage({ isDark, onToggleTheme, onNav }: { isDark: boolean; onToggleT
       <Section>
         <Row icon="🔑" label="API 配置" value="DeepSeek V4" onPress={()=>onNav('api')} dark={isDark} />
         <Row icon="❤️" label="赞赏" value="支持 Koyoi" onPress={()=>onNav('reward')} dark={isDark} />
-        <Row icon="ℹ️" label="关于" value="v2.17.0" onPress={()=>onNav('about')} dark={isDark} last />
+        <Row icon="ℹ️" label="关于" value={"v" + (Constants.expoConfig?.version || '2.19.0')} onPress={()=>onNav('about')} dark={isDark} last />
       </Section>
 
       <View style={{ height: 60 }} />

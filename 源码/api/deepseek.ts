@@ -270,6 +270,7 @@ async function readStream(
   const decoder = new TextDecoder();
   let fullText = '';
   let buffer = '';
+  let finalUsage: any = null;  // 流式响应中 usage 可能多次出现（部分API每个chunk都带），只取最后一次避免重复计费
 
   try {
     while (true) {
@@ -304,13 +305,19 @@ async function readStream(
             onToken?.(delta.content);
           }
           if (parsed.usage) {
-            updateCacheMetrics(parsed.usage);
-            if (model && startTime && config) recordUsage(model, parsed.usage, startTime, config);
+            // 收集最后一次 usage，流结束后统一记录（避免重复计费/token 虚增）
+            finalUsage = parsed.usage;
           }
         } catch {
           // 忽略解析错误
         }
       }
+    }
+
+    // 流结束后统一记录最后一次 usage
+    if (finalUsage) {
+      updateCacheMetrics(finalUsage);
+      if (model && startTime && config) recordUsage(model, finalUsage, startTime, config);
     }
 
     onComplete?.(fullText);
@@ -328,7 +335,7 @@ function updateCacheMetrics(usage: any) {
   cacheMetrics.totalCalls++;
   if (usage.prompt_cache_hit_tokens !== undefined) {
     cacheMetrics.hitTokens += usage.prompt_cache_hit_tokens;
-    cacheMetrics.missTokens += usage.prompt_cache_miss_tokens || 0;
+    cacheMetrics.missTokens += usage.prompt_cache_miss_tokens ?? 0;
     const total = cacheMetrics.hitTokens + cacheMetrics.missTokens;
     cacheMetrics.lastHitRate = total > 0
       ? cacheMetrics.hitTokens / total
@@ -341,7 +348,8 @@ function recordUsage(model: string, usageData: any, startTime: number, config: A
   const input = (usageData.prompt_tokens || 0);
   const output = (usageData.completion_tokens || 0);
   const hit = (usageData.prompt_cache_hit_tokens || 0);
-  const miss = (usageData.prompt_cache_miss_tokens || input);
+  // ?? 而非 ||：完全命中缓存（miss=0）时保持 0，不能回退成 input（否则费用按全量 miss 计，多算）
+  const miss = (usageData.prompt_cache_miss_tokens ?? input);
 
   try {
     useUsageStore.getState().record({
