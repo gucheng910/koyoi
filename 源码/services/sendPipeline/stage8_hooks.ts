@@ -94,8 +94,10 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
         }));
       }
     }).catch(() => { console.warn('[sendPipeline] world pulse failed'); });
-    saveSession(updated);
   }
+
+  // 每轮保存：防止崩溃/杀进程丢对话（曾因仅每5轮保存导致6轮对话丢失）
+  saveSession(updated);
 
   // 叙事导演已并入内容路由器（每轮输出 tone/intent/sceneHint），此处不再独立调用
 
