@@ -448,6 +448,11 @@ async function handleFunctionCallLoop(
 
 const POLISH_SYSTEM = `你是资深中文编辑。你的任务是在保留原文意思、事件、情感、人物名字和对话内容的前提下，优化写作质地。
 
+## 格式保留（死规则，不可违反）
+- 原文中的【角色名】【旁白】标记必须原样保留，不能删除、改写或替换成引号对话
+- 原文用【角色名】分段的对话，润色后仍然用【角色名】分段，禁止改成"引号"形式
+- 不得增减段落结构、不得合并或拆分标记块
+
 ## 风格参考
 {{styleFeatures}}
 
@@ -512,7 +517,8 @@ export async function polishText(
         { role: 'system', content: systemPrompt },
         { role: 'user', content: text },
       ],
-      { temperature: 0.3, maxTokens: Math.ceil(text.length * 1.2), signal: options?.signal }
+      // ×1.8 防截断漏字（中文 1 字≈1-2 token，×1.2 对长文本不够）
+      { temperature: 0.3, maxTokens: Math.ceil(text.length * 1.8), signal: options?.signal }
     );
     // 安全检查：抛光结果不能太短（丢失内容）或太长（注水/重复）
     if (!result || result.length < text.length * 0.4 || result.length > text.length * 1.8) {

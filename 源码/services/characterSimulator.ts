@@ -81,6 +81,7 @@ const SIMULATE_PROMPT = `你是{{name}}。你不是在"扮演"——你就是这
 {{scene}}
 {{events}}
 {{interactionState}}
+{{visibleDialogue}}
 在场的人：{{activeList}}
 
 ## 推演要求
@@ -139,7 +140,8 @@ export function buildSimulatePrompt(
   interactionState: 'active' | 'inactive',
   activeList: string,
   prevState?: string,
-  kbContext?: string
+  kbContext?: string,
+  dialogue?: string
 ): string {
   // 构建深层人格段落
   let deepSection = '';
@@ -160,7 +162,8 @@ export function buildSimulatePrompt(
     .replace('{{interactionState}}', interactionState === 'active' ? '你正在与玩家互动中' : '你此刻不在玩家视线内，在做自己的事')
     .replace('{{activeList}}', activeList)
     .replace('{{kbContext}}', kbContext ? `\n原著信息：${kbContext}` : '')
-    .replace('{{prevState}}', prevState ? `你上一轮的状态：${prevState}` : '');
+    .replace('{{prevState}}', prevState ? `你上一轮的状态：${prevState}` : '')
+    .replace('{{visibleDialogue}}', dialogue ? `你看到的对话：${dialogue}` : '');
   return prompt;
 }
 
@@ -204,12 +207,13 @@ export async function simulateCharacter(
   interactionState: 'active' | 'inactive',
   activeList: string,
   prevState?: string,
-  kbContext?: string
+  kbContext?: string,
+  dialogue?: string
 ): Promise<SimulateResult> {
   try {
     const capturedCalls: Array<{ action: string; character_name: string; narrative: string }> = [];
     const prompt = [
-      { role: 'system' as const, content: buildSimulatePrompt(char, scene, events, relationship, interactionState, activeList, prevState, kbContext) },
+      { role: 'system' as const, content: buildSimulatePrompt(char, scene, events, relationship, interactionState, activeList, prevState, kbContext, dialogue) },
       { role: 'user' as const, content: '推演' + char.name + '此刻的状态' },
     ];
     const raw = await chatCompletionSync(
@@ -260,7 +264,8 @@ export async function simulateCharacters(
   activeList: string,
   prevStates?: Record<string,{intent:string;mood:string}>,
   kbContexts?: Record<string, string>,
-  behaviorProfiles?: Record<string, string>
+  behaviorProfiles?: Record<string, string>,
+  dialogueByChar?: Record<string, string>
 ): Promise<{ actions: CharacterAction[]; interactionChanges: Array<{ action: string; character_name: string; narrative: string }> }> {
   const results = await Promise.all(characters.map(char => {
     const prev = prevStates?.[char.name];
@@ -268,7 +273,8 @@ export async function simulateCharacters(
     const kbCtx = kbContexts?.[char.name];
     const bpText = behaviorProfiles?.[char.name];
     const mergedKb = [kbCtx, bpText].filter(Boolean).join('\n');
-    return simulateCharacter(config, char, scene, events, char.relationship, char.interactionState, activeList, prevStr, mergedKb || undefined);
+    // 情报差隔离：每角色只注入其可见的对话（inactive 角色无对话情报）
+    return simulateCharacter(config, char, scene, events, char.relationship, char.interactionState, activeList, prevStr, mergedKb || undefined, dialogueByChar?.[char.name]);
   }));
   const actions: CharacterAction[] = [];
   const changes: Array<{ action: string; character_name: string; narrative: string }> = [];

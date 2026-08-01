@@ -325,3 +325,31 @@ async function loadJsonFile(path: string): Promise<any | null> {
     return null;
   }
 }
+
+
+// ---- 会话级知识库缓存：同一世界在会话中不重复读取文件 ----
+import { invalidateGraphCache } from './knowledgeGraph';
+
+const kbCache = new Map<string, KnowledgeBase | null>();
+
+export function loadKnowledgeBaseCached(worldId: string): Promise<KnowledgeBase | null> {
+  if (kbCache.has(worldId)) {
+    return Promise.resolve(kbCache.get(worldId) || null);
+  }
+  return loadKnowledgeBase(worldId).then(kb => {
+    kbCache.set(worldId, kb);
+    return kb;
+  });
+}
+
+/**
+ * 知识库变化后失效缓存（重新分析章节/追加章节后调用）
+ */
+export function invalidateKnowledgeBaseCache(worldId?: string): void {
+  if (worldId) {
+    kbCache.delete(worldId);
+  } else {
+    kbCache.clear();
+  }
+  invalidateGraphCache(worldId);
+}

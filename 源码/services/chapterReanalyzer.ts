@@ -4,7 +4,7 @@
 // ============================================================
 
 import { analyzeChunk } from './chapterAnalyzer';
-import { loadKnowledgeBase, saveKnowledgeBase, buildKnowledgeBase } from './knowledgeBase';
+import { loadKnowledgeBase, saveKnowledgeBase, buildKnowledgeBase, invalidateKnowledgeBaseCache } from './knowledgeBase';
 import { getNovelMeta, getChapter } from './novelStorage';
 import type { ApiConfig, ChapterAnalyzeResult } from '../types';
 
@@ -56,6 +56,7 @@ export async function reanalyzeChapters(
         relations: mergeRelLists(existingKB.relations, newKB.relations),
       };
       await saveKnowledgeBase(merged);
+      invalidateKnowledgeBaseCache(worldId);
     } else {
       const kb = buildKnowledgeBase(worldId, chapterCount, results);
       await saveKnowledgeBase(kb);

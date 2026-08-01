@@ -255,6 +255,7 @@ export interface AbilityState {
   end?: number | null; // 退化/结束章节
   status: 'active' | 'degraded';
   details: string;     // 能力描述与限制
+  owner?: string;      // 能力拥有者角色名（魂穿/身穿视角判断用）
 }
 
 export interface FanficWorldCard {

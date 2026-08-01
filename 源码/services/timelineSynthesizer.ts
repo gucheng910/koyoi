@@ -128,10 +128,11 @@ ${ruleClues || '（无）'}
 根据能力线索归纳主角/重要角色的超能力状态变化。**无超能力体系的小说返回空数组 []**。
 
 规则：
-- 每个能力一条：{"name":"能力名","start":起始章节(1-based),"end":退化/失去的章节(没有则 null),"status":"active"或"degraded","details":"能力描述与限制(30字内)"}
+- 每个能力一条：{"name":"能力名","owner":"拥有者角色名(如陈源)","start":起始章节(1-based),"end":退化/失去的章节(没有则 null),"status":"active"或"degraded","details":"能力描述与限制(30字内)"}
 - start 取能力首次出现的章节，end 取能力退化/消失的章节
 - status：当前仍在使用=active，已退化/弱化/消失=degraded
 - 若能力随剧情变化（新增/刷新/退化），必须完整列出所有阶段
+- owner 填能力拥有者角色名（通常为主角，但若能力属于其他角色则填该角色名）
 
 ### 8. 名场面
 从剧情中选出 10~20 个**影响全局的关键场面**（高光/转折/名场面，如破门救人表白重大对决）。每个场面：
@@ -152,7 +153,7 @@ ${ruleClues || '（无）'}
 - 没有明确关系发展的角色不列
 
 输出纯 JSON：
-{"worldType":"","summary":"","writingStyle":"","rules":{...},"globalTimeline":[...],"characterArcs":[...],"relationEvolution":[...],"keyDecisions":[...],"abilities":[{"name":"","start":1,"end":null,"status":"active","details":""}],"milestones":[{"character":"","milestones":[{"name":"","boundEvent":"","chapter":null}]}],"scenes":[{"title":"","trigger":{"location":"","characters":[],"keywords":[]},"originalPlot":"","chapter":1}]}`;
+{"worldType":"","summary":"","writingStyle":"","rules":{...},"globalTimeline":[...],"characterArcs":[...],"relationEvolution":[...],"keyDecisions":[...],"abilities":[{"name":"","owner":"","start":1,"end":null,"status":"active","details":""}],"milestones":[{"character":"","milestones":[{"name":"","boundEvent":"","chapter":null}]}],"scenes":[{"title":"","trigger":{"location":"","characters":[],"keywords":[]},"originalPlot":"","chapter":1}]}`;
 }
 
 /**
@@ -273,7 +274,7 @@ ${ruleClues || '（无）'}
   "characterArcs": [],
   "relationEvolution": [],
   "keyDecisions": [],
-  "abilities": [{"name":"能力名","start":1,"end":null,"status":"active","details":"描述"}],
+  "abilities": [{"name":"能力名","owner":"角色名","start":1,"end":null,"status":"active","details":"描述"}],
   "milestones": [{"character":"角色名","milestones":[{"name":"节点名","boundEvent":"事件","chapter":null}]}],
   "scenes": [{"title":"场面名","trigger":{"location":"","characters":[],"keywords":[]},"originalPlot":"走向","chapter":1}]
 }`;
@@ -339,6 +340,7 @@ export function applySynthesis(kb: KnowledgeBase, synth: SynthesisResult): Knowl
             .filter(a => a && typeof a.name === 'string' && a.name)
             .map(a => ({
               name: String(a.name).slice(0, 20),
+              owner: typeof a.owner === 'string' && a.owner ? String(a.owner).slice(0, 20) : undefined,
               start: Number(a.start) || 1,
               end: a.end != null ? Number(a.end) : null,
               status: a.status === 'degraded' ? 'degraded' as const : 'active' as const,

@@ -48,6 +48,21 @@ const T = (dark: boolean) => StyleSheet.create({
   sendText: { color: '#fff', fontSize: 15, fontWeight: '600' },
 });
 
+/** 引号对话高亮：无【角色名】标记时，将引号内容渲染为对话样式 */
+function highlightQuotes(text: string, isDark: boolean): React.ReactNode {
+  const parts = text.split(/([“"][^“”"]*[”"])/);
+  return parts.map((p, i) => {
+    const isQuote = /^[“"].+[”"]$/.test(p);
+    if (isQuote) {
+      return <Text key={i} style={{ color: '#5B9BD5', fontWeight: '600' }}>{p}</Text>;
+    }
+    if (p) {
+      return <Text key={i} style={{ color: isDark ? '#E8DCC8' : '#2D2822', fontSize: 15, lineHeight: 24 }}>{p}</Text>;
+    }
+    return null;
+  });
+}
+
 function parseSpeakers(text: string): { speaker: string; content: string }[] {
   const segments: { speaker: string; content: string }[] = [];
   // 支持全角【】和半角[]两种标记
@@ -275,10 +290,14 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
     }
     const speakers = parseSpeakers(item.content);
     const isLastAssistant = item.role === 'assistant' && messages.length > 0 && messages[messages.length - 1] === item && !isGenerating;
-    const inner = <View>{speakers.map((seg, i) => {
-      if (seg.speaker && seg.speaker !== '旁白') return <View key={i} style={st.msgBubble}><Text style={st.speakerName}>{seg.speaker}</Text><Text style={st.msgText}>{seg.content}</Text></View>;
-      return <Text key={i} style={[st.msgText, { paddingHorizontal: 16, paddingVertical: 4, color: isDark ? '#8A8070' : '#8A8068', fontStyle: 'italic', fontSize: 14, lineHeight: 22, borderLeftWidth: 2, borderLeftColor: isDark ? '#2C2A22' : '#E8E4DD', marginLeft: 4 }]}>{seg.content}</Text>;
-    })}</View>;
+    // 无【角色名】标记时（AI 用引号对话），引号内容高亮为对话样式
+    const hasSpeakerFormat = speakers.some(s => s.speaker && s.speaker !== '旁白');
+    const inner = hasSpeakerFormat
+      ? <View>{speakers.map((seg, i) => {
+          if (seg.speaker && seg.speaker !== '旁白') return <View key={i} style={st.msgBubble}><Text style={st.speakerName}>{seg.speaker}</Text><Text style={st.msgText}>{seg.content}</Text></View>;
+          return <Text key={i} style={[st.msgText, { paddingHorizontal: 16, paddingVertical: 4, color: isDark ? '#8A8070' : '#8A8068', fontStyle: 'italic', fontSize: 14, lineHeight: 22, borderLeftWidth: 2, borderLeftColor: isDark ? '#2C2A22' : '#E8E4DD', marginLeft: 4 }]}>{seg.content}</Text>;
+        })}</View>
+      : <View style={st.msgBubble}>{highlightQuotes(item.content, isDark)}</View>;
     if (isLastAssistant) {
       return (
         <TouchableOpacity activeOpacity={0.9} onLongPress={handleRegenerate}>

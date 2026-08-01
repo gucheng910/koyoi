@@ -3,11 +3,11 @@
 // ============================================================
 
 import React from 'react';
-import { NARRATOR_BASE, NARRATOR_FANFIC_APPEND, VOCAB_LOCK, POST_HISTORY_BASE, WORLD_RULES } from '../../prompts/worldRules';
+import { NARRATOR_BASE, NARRATOR_FANFIC_APPEND, VOCAB_LOCK, POST_HISTORY_BASE, WORLD_RULES, ANTI_AI_PATTERN } from '../../prompts/worldRules';
 import { contextToPrompt } from '../dialogueContext';
 import { selectMemoriesForPrompt } from '../memoryManager';
-import { loadKnowledgeBase } from '../knowledgeBase';
-import { KnowledgeGraph } from '../knowledgeGraph';
+import { loadKnowledgeBaseCached as loadKnowledgeBase } from '../knowledgeBase';
+import { getKnowledgeGraph } from '../knowledgeGraph';
 import { getRecentBadFeedback, getGoodSamples } from '../feedbackStore';
 import { computeAdjustments, findSimilarSamples } from '../promptTuner';
 import type { PromptAdjustment } from '../promptTuner';
@@ -32,6 +32,7 @@ export interface PromptResult {
 function playerIdentityPrompt(session: any): string {
   const pName = session.selectedCharacters?.[0]?.name || '玩家';
   let identity = `【玩家身份】${pName}是你正在互动的玩家角色。[说]=玩家角色在说话，[行动]=玩家角色的行为。你扮演除玩家以外的所有角色和旁白。`;
+  identity += `\n玩家角色的名字就是「${pName}」，其他角色对玩家的称呼按此名字（或符合关系设定的昵称），不得给玩家另起新名字或改称。`;
   const fc = session.fanficConfig;
   if (fc?.type === 'soul') {
     const soulStatus = fc.originalSoulStatus === 'coexisting'
@@ -59,9 +60,21 @@ function currentAbilities(world: any, chapter: number, soulName?: string): strin
   const degraded = abilities.filter((a: any) => a.end && a.end < cur);
   const parts: string[] = [];
   if (active.length > 0) {
-    // 魂穿时以玩家为主体（"你（陈源）的能力"），身穿时第三人称
-    const subject = soulName ? `你（${soulName}）` : '当前角色';
-    parts.push(subject + '的能力：' + active.map((a: any) => a.name + (a.details ? '（' + a.details + '）' : '')).join('；'));
+    // 魂穿目标拥有的能力 → "你（X）"；其他角色的能力 → 第三人称（能力归属不随魂穿转移）
+    const mine = soulName ? active.filter((a: any) => !a.owner || a.owner === soulName) : [];
+    const npc = active.filter((a: any) => !mine.includes(a));
+    if (mine.length > 0) {
+      parts.push(`你（${soulName}）的能力：` + mine.map((a: any) => a.name + (a.details ? '（' + a.details + '）' : '')).join('；'));
+    }
+    // NPC 能力按拥有者分组
+    const byOwner: Record<string, any[]> = {};
+    for (const a of npc) {
+      const owner = a.owner || '其他角色';
+      (byOwner[owner] = byOwner[owner] || []).push(a);
+    }
+    for (const [owner, list] of Object.entries(byOwner)) {
+      parts.push(owner + '的能力：' + list.map((a: any) => a.name + (a.details ? '（' + a.details + '）' : '')).join('；'));
+    }
   }
   if (degraded.length > 0) {
     parts.push('已退化能力：' + degraded.map((a: any) => a.name).join('、'));
@@ -79,13 +92,15 @@ function currentForeshadows(world: any, chapter: number): string {
   if (!Array.isArray(foreshadows) || foreshadows.length === 0) return '';
   const cur = chapter + 1; // 1-based
 
-  // 从已发生剧情中收集已回收的伏笔名
+  // 从已发生剧情中收集已回收的伏笔名（回收事件必须严格晚于埋设章节，避免埋设事件本身误判）
   const resolvedNames = new Set<string>();
   const timeline = (world?.timeline || []).filter((t: any) => (t.chapter || 0) <= chapter);
-  for (const ev of timeline) {
-    const desc = ev.description || ev.event || '';
-    for (const f of foreshadows) {
-      if (f.name && desc.includes(f.name)) resolvedNames.add(f.name);
+  for (const f of foreshadows) {
+    if (!f.name) continue;
+    for (const ev of timeline) {
+      if ((ev.chapter || 0) <= (f.planted || 1)) continue; // 埋设章及之前不算回收
+      const desc = ev.description || ev.event || '';
+      if (desc.includes(f.name)) { resolvedNames.add(f.name); break; }
     }
   }
 
@@ -175,11 +190,12 @@ export async function assemblePrompt(
   const chapterPrompt = (isFanfic && chapterCtx) ? contextToPrompt(chapterCtx) : '';
 
   const stableSystem = [
+    POST_HISTORY_BASE,
+    ANTI_AI_PATTERN,
     '你是' + (session.world?.name || '未知世界') + '的叙事引擎。' + NARRATOR_BASE + fanficAppend,
     OOC_RULES.NO_AI_ASSISTANT,
     isFanfic ? VOCAB_LOCK : '',
     ...WORLD_RULES,
-    POST_HISTORY_BASE,
   ].join('\n');
 
   let scenarioBlock = '';
@@ -195,7 +211,7 @@ export async function assemblePrompt(
     try {
       const kb = await loadKnowledgeBase(session.worldNovelId);
       if (kb) {
-        const graph = new KnowledgeGraph(kb, session.currentChapter || 0);
+        const graph = getKnowledgeGraph(kb, session.currentChapter || 0);
         const focal = session.selectedCharacters[0]?.name;
         if (focal && graph.adjacency.has(focal)) {
           relationGraphBlock = graph.toRelationContext(focal, 2);
@@ -205,7 +221,7 @@ export async function assemblePrompt(
   }
 
   const styleFeat = (session.world as any)?.styleFeatures
-    ? '\n风格特征：\n' + (session.world as any).styleFeatures
+    ? '\n风格特征：' + String((session.world as any).styleFeatures).slice(0, 400)
     : '';
 
   let tuningBlock = '';
@@ -317,7 +333,7 @@ export async function assemblePrompt(
     const orig = wc?.role || wc?.relationship?.status || '';
     const deep = wc?.personality._deepProfile || '';
     let line = '- ' + n.name + '：' + n.role + (orig ? '（原著：' + orig + '）' : '') + '，' + n.personality;
-    if (deep) line += ' | ' + deep;
+    if (deep) line += ' | ' + deep.slice(0, 80);
     dynamicParts.push(line);
   }
 
@@ -336,7 +352,7 @@ export async function assemblePrompt(
   if (session.worldBible) dynamicParts.push('\n世界圣经：' + session.worldBible);
 
   if ((session.world as any)?.styleSamples?.length > 0) {
-    dynamicParts.push('\n风格参考：' + (session.world as any).styleSamples.slice(0, 2).map((s: string) => '「' + s + '」').join('\n'));
+    dynamicParts.push('\n原著文风锚定（旁白必须达到这个质感）：' + (session.world as any).styleSamples.slice(0, 2).map((s: string) => '「' + String(s).slice(0, 120) + '」').join('\n'));
   }
 
   // 叙事导演指示
@@ -350,10 +366,18 @@ export async function assemblePrompt(
 
   const dynamicSystem = dynamicParts.filter(p => p && p.trim().length > 0).join('\n');
 
+  // 对话历史：只保留最近 16 条，更早的内容由 summaryRef 摘要补偿
+  // （历史全量注入会让 prompt 随对话无限膨胀，flash 长 prompt 下质量急剧下降）
+  const HISTORY_LIMIT = 16;
+  let historyMsgs = msgsWithUser.slice(1);
+  if (historyMsgs.length > HISTORY_LIMIT) {
+    historyMsgs = historyMsgs.slice(-HISTORY_LIMIT);
+  }
+
   const prompt = [
     { role: 'system' as const, content: stableSystem },
     { role: 'system' as const, content: dynamicSystem },
-    ...msgsWithUser.slice(1).map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+    ...historyMsgs.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
   ];
 
   return { prompt, chapterPrompt, scenarioBlock };

@@ -198,3 +198,26 @@ export class KnowledgeGraph {
     return '----- RELATION GRAPH -----\n' + lines.join('\n');
   }
 }
+
+
+// ---- 会话级图缓存：同 worldId+chapter 的图复用，避免每轮重建 ----
+const graphCache = new Map<string, KnowledgeGraph>();
+
+export function getKnowledgeGraph(kb: KnowledgeBase, currentChapter?: number): KnowledgeGraph {
+  const key = (kb.worldId || 'w') + '_' + (currentChapter || 0);
+  if (!graphCache.has(key)) {
+    graphCache.set(key, new KnowledgeGraph(kb, currentChapter));
+  }
+  return graphCache.get(key)!;
+}
+
+export function invalidateGraphCache(worldId?: string): void {
+  if (worldId) {
+    const prefix = worldId + '_';
+    for (const k of [...graphCache.keys()]) {
+      if (k.startsWith(prefix)) graphCache.delete(k);
+    }
+  } else {
+    graphCache.clear();
+  }
+}

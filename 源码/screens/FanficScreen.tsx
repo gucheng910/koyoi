@@ -370,16 +370,15 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
       const synth = await synthesizeTimeline(cfg, worldId, kb);
       console.log('[KOYOI] synth result:', !!synth);
       if (synth) kb = applySynthesis(kb, synth);
-      // 风格特征分析（注入 Polish 和主 prompt）
-      setParsingStatus('分析写作风格特征…');
-      console.log('[KOYOI] analyzeStyle start');
-      const styleFeatures = await analyzeStyleFeatures(cfg, kb);
+      // 风格特征分析 + 关键角色深挖：两者只依赖 kb，可并行（省一次串行等待）
+      setParsingStatus('分析写作风格并深挖主要角色…');
+      console.log('[KOYOI] analyzeStyle + deepDive start (parallel)');
+      const [styleFeatures, dived] = await Promise.all([
+        analyzeStyleFeatures(cfg, kb),
+        deepDiveProtagonists(cfg, kb, (msg) => setParsingStatus(msg)).catch((e: any) => { console.warn('[KOYOI] deep dive failed:', e.message); return [] as string[]; }),
+      ]);
       console.log('[KOYOI] styleFeatures length:', styleFeatures?.length || 0);
-      // 关键角色深挖：对主角团生成行为决策引擎（写回 kb.characters，随知识库保存）
-      try {
-        const dived = await deepDiveProtagonists(cfg, kb, (msg) => setParsingStatus(msg));
-        if (dived.length > 0) console.log('[KOYOI] deep dive done:', dived.length, 'chars');
-      } catch (e: any) { console.warn('[KOYOI] deep dive failed:', e.message); }
+      if (dived.length > 0) console.log('[KOYOI] deep dive done:', dived.length, 'chars');
       console.log('[KOYOI] saveKnowledgeBase start');
       setParsingStatus('正在保存分析结果…');
       await saveKnowledgeBase(kb);
@@ -457,6 +456,11 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
 
   const buildOpening = async () => {
     if (!worldCard || building) return;
+    // 魂穿必须选择目标角色（否则能力/记忆/关系归属会错乱）
+    if (transType === 'soul' && !targetCharId) {
+      setToast({msg: '请先选择魂穿目标角色', type: 'error'});
+      return;
+    }
     setBuilding(true);
     const cfg = (() => { const c = configStore.getActiveConfig(); return c ? { ...c, model: analysisModel, temperature: parseFloat(analysisTemp)||0.2, thinkingMode: 'disabled' as const, maxTokens: 4096, safetyFilter: 'off' as const } : null; })();
     if (!cfg?.apiKey) { setToast({msg:'请先配置API Key', type:'error'}); setBuilding(false); return; }

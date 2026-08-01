@@ -96,10 +96,27 @@ export async function runCharacterSimulation(
   }
 
   try {
+    // 情报差隔离：构造每角色可见对话
+    // active 角色（在场）→ 看到最近对话；inactive（不在场）→ 无对话情报（系统级隔离，不靠 AI 判断）
+    const dialogueByChar: Record<string, string> = {};
+    const recentMsgs = (session.messages || []).slice(-6);
+    if (recentMsgs.length > 0) {
+      const dialogueText = recentMsgs.map(m => {
+        const who = m.role === 'user' ? '[玩家]' : '[其他人]';
+        return who + '：' + String(m.content || '').slice(0, 80);
+      }).join('\n');
+      const activeNames = new Set(activeChars.current);
+      for (const c of chars) {
+        if (c.interactionState === 'active' && activeNames.has(c.name)) {
+          dialogueByChar[c.name] = dialogueText;
+        }
+      }
+    }
+
     const result = await simulateCharacters(
       cfg, chars, session.currentScene,
       (session.recentWorldEvents || []).slice(-2).join('；'),
-      activeChars.current.join('、'), lastSimResults.current, simKbContext, behaviorProfiles
+      activeChars.current.join('、'), lastSimResults.current, simKbContext, behaviorProfiles, dialogueByChar
     );
     const actions = result.actions;
 

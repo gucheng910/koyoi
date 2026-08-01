@@ -15,7 +15,8 @@ export async function callAI(
       let full = '';
       let lastUpdate = 0;
       chatCompletion({
-        config: { ...cfg, thinkingMode: 'disabled' },
+        // 温度固定 0.75：文学创作温度过高（默认 1.3）会发散致乱
+        config: { ...cfg, thinkingMode: 'disabled', temperature: 0.75 },
         messages: prompt,
         onToken: (token) => {
           full += token;

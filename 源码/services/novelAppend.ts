@@ -8,7 +8,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { detectChapters } from './chapterSplitter';
 import { assembleChunks } from './chunkAssembler';
 import { analyzeAllChunks } from './chapterAnalyzer';
-import { buildKnowledgeBase, saveKnowledgeBase, loadKnowledgeBase } from './knowledgeBase';
+import { buildKnowledgeBase, saveKnowledgeBase, loadKnowledgeBase, invalidateKnowledgeBaseCache } from './knowledgeBase';
 import { synthesizeTimeline, applySynthesis } from './timelineSynthesizer';
 import { analyzeStyleFeatures } from './styleAnalyzer';
 import { getNovelMeta, updateNovelMeta, saveChapter } from './novelStorage';
@@ -204,6 +204,7 @@ export async function appendToWorld(
 
   // 保存
   await saveKnowledgeBase(mergedKB);
+  invalidateKnowledgeBaseCache(worldId);
 
   return {
     chapterCount: mergedChapters.length,

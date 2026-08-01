@@ -5,7 +5,7 @@
 // ============================================================
 
 import { getChapter, getNovelMeta } from './novelStorage';
-import { loadKnowledgeBase } from './knowledgeBase';
+import { loadKnowledgeBaseCached as loadKnowledgeBase } from './knowledgeBase';
 import type { KnowledgeBase, ChapterMeta } from '../types';
 
 export interface DialogueContext {
@@ -282,35 +282,36 @@ export function contextToPrompt(ctx: DialogueContext): string {
   const devTag = ctx.deviation === '较大' || ctx.deviation === '完全偏离' ? '【原著参考，已大幅偏离】'
     : ctx.deviation === '中等' ? '【原著参考】' : '';
 
-  // 当前章节原文（缓存友好：前缀段每章只变一次）
+  // 当前章节原文（截断到 1000 字：文风参考够用，整章注入会拖垮输出质量）
   if (ctx.chapterText) {
-    parts.push('\n【当前章节原文】（请基于这段原文的自然节奏和细节来写，不要写成说明书）\n「' + ctx.chapterText + '」');
+    const sliced = ctx.chapterText.length > 1000 ? ctx.chapterText.slice(0, 1000) : ctx.chapterText;
+    parts.push('\n【当前章节原文】（请基于这段原文的自然节奏和细节来写，不要写成说明书）\n「' + sliced + '」');
   }
 
   // 优先用智能摘要（结构化的剧情锚点，信息密度远高于原文）
   if (ctx.chapterDigest && ctx.chapterDigest.length > 0) {
-    const digestLines = ctx.chapterDigest.map(d => {
+    const digestLines = ctx.chapterDigest.slice(0, 12).map(d => {
       const charTags = d.chars.length > 0 ? ` [涉及：${d.chars.join('、')}]` : '';
       return `第${d.chapter+1}章：${d.event}${charTags}`;
     });
     parts.push('\n当前剧情位置（第' + (ctx.chapterRange[0]+1) + '~' + (ctx.chapterRange[1]+1) + '章）' + (devTag ? ' ' + devTag : '') + '：\n' + digestLines.join('\n'));
     // 风格模板（独立注入，告诉 AI 怎么写）
     if (ctx.styleTemplate) {
-      parts.push('\n原文风格模板（请用这种句长、节奏、感官密度来写）：\n「' + ctx.styleTemplate + '」');
+      parts.push('\n原文风格模板（请用这种句长、节奏、感官密度来写）：\n「' + ctx.styleTemplate.slice(0, 300) + '」');
     }
   } else if (ctx.styleTemplate) {
     // 兜底：如果没有结构化摘要，用风格模板当原文参考
-    parts.push('\n原文参考（第' + (ctx.chapterRange[0]+1) + '~' + (ctx.chapterRange[1]+1) + '章）' + (devTag ? ' ' + devTag : '') + '：\n「' + ctx.styleTemplate + '」');
+    parts.push('\n原文参考（第' + (ctx.chapterRange[0]+1) + '~' + (ctx.chapterRange[1]+1) + '章）' + (devTag ? ' ' + devTag : '') + '：\n「' + ctx.styleTemplate.slice(0, 300) + '」');
   }
 
   if (ctx.activeCharacters.length > 0) {
     // 角色 DNA 卡片：只保留最核心的不可变特征
-    parts.push(`\n【角色 DNA——以下特征不可违背】\n${ctx.activeCharacters.map(c => {
+    parts.push(`\n【角色 DNA——以下特征不可违背】\n${ctx.activeCharacters.slice(0, 4).map(c => {
       const traits = c.traits.slice(0, 3).join('/');
       let card = `  ▸ ${c.name}（${c.role}）`;
       card += ` | 性格：${traits || '未知'}`;
       if (c.speechStyle) card += `\n    说话方式：${c.speechStyle}`;
-      if (c.speechSample) card += `\n    ⚠ 必须这样说话（偏离即 OOC）：「${c.speechSample.slice(0, 60)}」`;
+      if (c.speechSample) card += `\n    ⚠ 必须这样说话（偏离即 OOC）：「${c.speechSample.slice(0, 40)}」`;
       if (c.relationshipAttitudes) card += `\n    关系态度：${c.relationshipAttitudes}`;
       if (c.sceneReason) card += `\n    出场理由：${c.sceneReason}`;
       if (c.knowledgeWarning) card += `\n    ⚠ ${c.knowledgeWarning}`;
@@ -325,14 +326,14 @@ export function contextToPrompt(ctx: DialogueContext): string {
   }
 
   if (ctx.styleSamples.length > 0) {
-    parts.push(`\n当前文风参考：\n${ctx.styleSamples.slice(0, 3).map(s => '「' + s + '」').join('\n')}`);
+    parts.push(`\n当前文风参考：\n${ctx.styleSamples.slice(0, 2).map(s => '「' + String(s).slice(0, 120) + '」').join('\n')}`);
   }
 
   if (ctx.searchResults && ctx.searchResults.length > 0) {
-    parts.push('\n🔍 搜索匹配：\n' + ctx.searchResults.map(r => '  [' + r.type + '] ' + r.match).join('\n'));
+    parts.push('\n🔍 搜索匹配：\n' + ctx.searchResults.slice(0, 5).map(r => '  [' + r.type + '] ' + r.match).join('\n'));
   }
   if (ctx.nearbyEvents.length > 0) {
-    parts.push(`\n附近剧情锚点：\n${ctx.nearbyEvents.map(e => `  第${e.chapter+1}章：${e.event}`).join('\n')}`);
+    parts.push(`\n附近剧情锚点：\n${ctx.nearbyEvents.slice(0, 5).map(e => `  第${e.chapter+1}章：${e.event}`).join('\n')}`);
   }
 
   // 记忆注入
