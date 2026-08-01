@@ -306,8 +306,8 @@ export function contextToPrompt(ctx: DialogueContext): string {
 
   if (ctx.activeCharacters.length > 0) {
     // 角色 DNA 卡片：只保留最核心的不可变特征
-    parts.push(`\n【角色 DNA——以下特征不可违背】\n${ctx.activeCharacters.slice(0, 4).map(c => {
-      const traits = c.traits.slice(0, 3).join('/');
+    parts.push(`\n【角色 DNA——以下特征不可违背】\n${ctx.activeCharacters.slice(0, 6).map(c => {
+      const traits = c.traits.slice(0, 8).join('/');
       let card = `  ▸ ${c.name}（${c.role}）`;
       card += ` | 性格：${traits || '未知'}`;
       if (c.speechStyle) card += `\n    说话方式：${c.speechStyle}`;

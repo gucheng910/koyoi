@@ -305,7 +305,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
     const speakers = parseSpeakers(item.content);
     const isLastAssistant = item.role === 'assistant' && messages.length > 0 && messages[messages.length - 1] === item && !isGenerating;
     // 无【角色名】标记时（AI 用引号对话），引号内容高亮为对话样式
-    const hasSpeakerFormat = speakers.some(s => s.speaker && s.speaker !== '旁白');
+    const hasSpeakerFormat = speakers.some(s => s.speaker);
     const inner = hasSpeakerFormat
       ? <View>{speakers.map((seg, i) => {
           if (seg.speaker && seg.speaker !== '旁白') return <View key={i} style={st.msgBubble}><Text style={st.speakerName}>{seg.speaker}</Text><Text style={st.msgText}>{seg.content}</Text></View>;

@@ -314,7 +314,7 @@ export async function assemblePrompt(
   const worldChars = (session.world as any)?.characters || [];
   if (worldChars.length > 0) {
     const keyRoster = worldChars.slice(0, 6).map((c: any) =>
-      `- ${c.name}：${c.role || '未知身份'}${(c.relationship && c.relationship.status) ? '，与玩家：' + c.relationship.status : ''}`
+      `- ${c.name}：${c.role || '未知身份'}${(c.relationship && c.relationship.status) ? '，与玩家：' + c.relationship.status : ''}${c.personality?.traits?.length ? ' | 性格：' + c.personality.traits.slice(0, 5).join('、') : ''}${c.personality?._deepProfile ? ' | ' + String(c.personality._deepProfile).slice(0, 60) : ''}`
     ).join(String.fromCharCode(10));
     dynamicParts.push('\n【原著关键角色档案（这些角色的身份/学校/位置以此为准，不得混淆）】\n' + keyRoster);
   }
