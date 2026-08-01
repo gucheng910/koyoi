@@ -438,7 +438,7 @@ export async function assemblePrompt(
     if (dirText) dynamicParts.push(dirText);
   }
 
-  dynamicParts.push('\n【角色引入】需要引入新角色时，只使用【世界角色】中的原著角色（关键角色档案里列出的），在回复末尾添加 ___META___ {"newCharacter":"角色名"}；原著不存在的角色禁止创造');
+  dynamicParts.push('\n【角色引入】需要引入新角色时，优先使用【世界角色】中的原著角色；确需创造新角色时，必须符合原著设定逻辑（如原著提到的关系位），角色名与原著风格一致，且经 ___META___ {"newCharacter":"角色名"} 标记引入');
   dynamicParts.push('【场景】场景发生转变时（如从教室走到广播台），在回复末尾添加 ___META___ {"scene":"新场景名称"}；场景未转变则不添加');
 
   const dynamicSystem = dynamicParts.filter(p => p && p.trim().length > 0).join('\n');

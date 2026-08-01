@@ -543,11 +543,24 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
       return ch >= Math.max(0, entryChapterNum - 3) && ch <= Math.min(worldCard.totalChapters || 100, entryChapterNum + 3);
     }).slice(0, 8);
 
-    // 加载入口章节原文
+    // 加载入口章节原文（时间点对应的章节；novelMeta 缺失时也尝试，worldCard.id 即 novelId）
     let entryChapterText = '';
-    if (entryChapterNum > 0 && novelMeta) {
+    let entryLocationText = '';  // 穿越地点在原著中的场景原文
+    if (entryChapterNum >= 0) {
       setParsingStatus('正在加载入口章节原文...');
-      try { const chText = await getChapter(worldCard.id, entryChapterNum); if (chText) entryChapterText = chText.slice(0, 2000); } catch {}
+      try {
+        const chText = await getChapter(worldCard.id, entryChapterNum);
+        if (chText) {
+          entryChapterText = chText.slice(0, 2000);
+          // 地点原文：入口章节中提及穿越地点的段落（如有）
+          if (entryLocation) {
+            const locName = (matchedLocation || entryLocation).slice(0, 4);
+            const paragraphs = chText.split(/\n{2,}/);
+            const locPars = paragraphs.filter((p: string) => p.includes(locName) || (matchedLocation && p.includes(matchedLocation.slice(0, 2))));
+            if (locPars.length > 0) entryLocationText = locPars.slice(0, 2).join('\n\n').slice(0, 600);
+          }
+        }
+      } catch {}
     }
 
     // ===== 构建玩家视角的世界收束信息 =====
@@ -596,11 +609,14 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
     if (entryChapterText) {
       worldConvergence.push('', '## 入口章节原文（供场景参考）', entryChapterText);
     }
+    if (entryLocationText) {
+      worldConvergence.push('', '## 穿越地点的原著场景原文（供场景参考）', entryLocationText);
+    }
 
-    // 世界原著角色名单：防止开场凭空捏造原著没有的新角色（如把"周宇的兄弟"造出一个唐建）
+    // 世界原著角色名单：优先使用原著角色；确需创造时须合理植入
     const knownNames = (worldCard.characters || []).map((c: any) => c.name).filter(Boolean);
     if (knownNames.length > 0) {
-      worldConvergence.push('', '## 世界原著角色名单（仅此名单内的角色可以出场）', knownNames.join('、'));
+      worldConvergence.push('', '## 世界原著角色名单（优先使用这些角色）', knownNames.join('、'));
     }
 
     // ===== Step 2: 基于收敛世界生成开场 =====
@@ -624,7 +640,7 @@ ${isSoul ? '- 魂穿：写出意识进入新身体的错位感。你发现自己
 - ${plotKnowledge ? '因为你知道剧情，你的内心活动可以包含"接下来本应…"的预感' : '你对一切感到陌生，只能凭借眼前的信息判断局势'}
 - 结尾留悬念。不要总结。
 
-3. npcs（1-4个）：初始在场的角色 {name, role, personality, currentStatus}。**只能从【世界原著角色名单】中选择，禁止创造名单之外的新角色**；名单里没有合适角色时 npcs 可以为空
+3. npcs（1-4个）：初始在场的角色 {name, role, personality, currentStatus}。优先使用【世界原著角色名单】中的角色；确需创造新角色时，必须合理植入——符合原著的人物关系逻辑（如原著提到的"兄弟/同桌/对门"等关系位）、名字风格与原著一致，且不超过1个
 4. worldState：从穿越者视角看，当前世界的一句话局势
 
 只返回JSON：{"worldBible":"...","scene":"...","npcs":[...],"worldState":"..."}`
