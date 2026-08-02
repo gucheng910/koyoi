@@ -329,13 +329,13 @@ export async function assemblePrompt(
     }
   }
 
-  // 原著关键角色档案：不在场主角的基础身份始终注入，防止身份/位置幻觉
+  // 原著关键角色档案：不在场主角的完整档案始终注入（截断是身份/家事漂移的根源）
   const worldChars = (session.world as any)?.characters || [];
   if (worldChars.length > 0) {
     const keyRoster = worldChars.slice(0, 6).map((c: any) => {
-      // 深度画像：120字覆盖 contradictions/signatureScenes（家庭背景/关键经历常在后段）
-      const dp = c.personality?._deepProfile ? String(c.personality._deepProfile).slice(0, 120) : '';
-      return `- ${c.name}：${c.role || '未知身份'}${(c.relationship && c.relationship.status) ? '，与玩家：' + c.relationship.status : ''}${c.personality?.traits?.length ? ' | 性格：' + c.personality.traits.slice(0, 5).join('、') : ''}${dp ? ' | ' + dp : ''}`;
+      // 深度画像完整注入：contradictions/signatureScenes（家庭背景/关键经历）不截断
+      const dp = c.personality?._deepProfile ? String(c.personality._deepProfile) : '';
+      return `- ${c.name}：${c.role || '未知身份'}${(c.relationship && c.relationship.status) ? '，与玩家：' + c.relationship.status : ''}${c.personality?.traits?.length ? ' | 性格：' + c.personality.traits.join('、') : ''}${dp ? ' | ' + dp : ''}`;
     }).join(String.fromCharCode(10));
     dynamicParts.push('\n【原著关键角色档案（这些角色的身份/学校/位置以此为准，不得混淆）】\n' + keyRoster);
   }
@@ -345,7 +345,7 @@ export async function assemblePrompt(
     const extraLines = routerDecision.extraChars
       .map(name => worldChars.find((c: any) => c.name === name))
       .filter((c: any) => c && c.name)
-      .map((c: any) => `- ${c.name}：${c.role || '未知身份'} | 性格：${(c.personality?.traits || []).slice(0, 3).join('、') || '未知'}${c.relationship?.status ? ' | 与玩家：' + c.relationship.status : ''}${c.personality?._deepProfile ? ' | ' + String(c.personality._deepProfile).slice(0, 80) : ''}`);
+      .map((c: any) => `- ${c.name}：${c.role || '未知身份'} | 性格：${(c.personality?.traits || []).join('、') || '未知'}${c.relationship?.status ? ' | 与玩家：' + c.relationship.status : ''}${c.personality?._deepProfile ? ' | ' + String(c.personality._deepProfile) : ''}`);
     if (extraLines.length > 0) {
       dynamicParts.push('\n【本轮相关角色档案（该角色不在场但被玩家提及，其身份/学校/位置以此为准）】\n' + extraLines.join('\n'));
     }
@@ -371,8 +371,8 @@ export async function assemblePrompt(
   }
 
   for (const c of session.selectedCharacters) {
-    // 焦点角色（路由器指定）注入完整深度画像，非焦点角色省略 deepProfile（减负）
-    const deep = focusSet.has(c.name) ? c.personality._deepProfile || '' : '';
+    // 深度画像完整注入（不截断、不区分焦点角色）：完整档案是角色一致性的基石
+    const deep = c.personality._deepProfile || '';
     const dialogue = (c.exampleDialogues || []).slice(0, 2).map((d: any) => d.character).join(' / ');
     let line = '- ' + c.name + '：' + c.personality.traits.join('、') + '，' + c.relationship.status;
     const att = attitudes.current[c.name];
