@@ -273,6 +273,9 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
         setMessages(updated);
         smartScroll();
 
+        // 立即保存（不依赖 stage8 hooks 成功）：hooks 内部逻辑抛错会中断 saveSession，导致整轮丢失
+        saveSession(updated);
+
         // 阶段 8: 后处理钩子
         runPostSendHooks({ session: sessionRef.current, updated, turnCount, saveSession, setSession, activeChars, lastSimResults, charActions, userMsg });
       }

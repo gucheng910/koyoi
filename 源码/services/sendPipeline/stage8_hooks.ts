@@ -33,6 +33,8 @@ export interface PostSendHooksParams {
 export async function runPostSendHooks(params: PostSendHooksParams) {
   const { updated, turnCount, saveSession, setSession, session, charActions, userMsg } = params;
   console.log('[PIPELINE] stage8 hooks start turn=' + turnCount.current);
+  // hooks 整体保护：任一子逻辑抛错不得中断后续（保存已在 send 主流程完成，hooks 失败不影响数据）
+  try {
 
   turnCount.current++;
 
@@ -152,5 +154,8 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
           if (interaction) setSession(prev => applyBackgroundInteraction(prev, interaction));
         }).catch(() => { console.warn('[sendPipeline] background interaction failed'); });
     }
+  }
+  } catch (e) {
+    console.warn('[sendPipeline] stage8 hooks error: ' + (e instanceof Error ? e.message : String(e)));
   }
 }
