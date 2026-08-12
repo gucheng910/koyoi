@@ -4,7 +4,7 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
-  StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, LayoutAnimation,
+  StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, LayoutAnimation, Keyboard,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useConfigStore } from '../store/configStore';
@@ -105,6 +105,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
   const [inputText, setInputText] = useState('');
   const [segments, setSegments] = useState<{text: string; tag: string}[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [kbVisible, setKbVisible] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{msg:string;type:'success'|'error'|'info'}>({msg:'',type:'success'});
@@ -119,6 +120,13 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
   const isNearBottom = useRef(true);
   const attitudes = useRef<Record<string, any>>((session as any).characterAttitudes || {});
   const summaryRef = useRef('');
+
+  // 键盘状态监听：Android 用 adjustResize 自动处理上移，键盘弹出时输入区底部内边距归零（贴键盘），收起时恢复安全区
+  useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', () => setKbVisible(true));
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => setKbVisible(false));
+    return () => { showSub.remove(); hideSub.remove(); };
+  }, []);
 
   const greetings = ['世界正在苏醒…','墨水尚未干透…','故事即将开始…','角色们正在就位…'];
   const greeting = greetings[Math.floor(Math.random() * greetings.length)];
@@ -355,7 +363,8 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
 
   return (
     <FadeIn style={{ flex: 1 }}>
-    <KeyboardAvoidingView style={st.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+    {Platform.OS === 'ios' ? (
+    <KeyboardAvoidingView style={st.container} behavior="padding" keyboardVerticalOffset={90}>
       <View style={[st.topBarBase, { paddingTop: SAFE_TOP }]}>
         <TouchableOpacity onPress={() => { if (isGenerating) showAlert('退出','对话生成中，确定退出？',[{text:'取消'},{text:'退出',style:'destructive',onPress: async () => { try { await saveSession(); } catch {} finally { onBack(); } }}]); else { saveSession().then(() => onBack()).catch(() => onBack()); } }}><Text style={st.backBtn}>← 返回</Text></TouchableOpacity>
         <View style={{ flex: 1 }}>
@@ -396,7 +405,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
           ))}
         </View>
       )}
-      <View style={[st.inputBarBase, { paddingBottom: bottomInset }]}>
+      <View style={[st.inputBarBase, { paddingBottom: kbVisible ? 0 : bottomInset }]}>
         <TouchableOpacity onPress={() => commitSegment('speech')} style={{ paddingHorizontal: 6, paddingVertical: 12, marginRight: 2 }}><Text style={{ fontSize: 12, color: '#5B9BD5', fontWeight: '700' }}>说</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => commitSegment('action')} style={{ paddingHorizontal: 6, paddingVertical: 12, marginRight: 4 }}><Text style={{ fontSize: 12, color: '#8A8070', fontWeight: '700' }}>行动</Text></TouchableOpacity>
         <TextInput style={st.textInput} value={inputText} onChangeText={setInputText} placeholder="输入消息..." placeholderTextColor={isDark ? '#555' : '#bbb'} multiline maxLength={2000} editable={!isGenerating} returnKeyType="send" />
@@ -406,6 +415,44 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
       </View>
       <Toast visible={toast.msg !== ''} message={toast.msg} type={toast.type} onHide={() => setToast({msg:'',type:'success'})} />
     </KeyboardAvoidingView>
+    ) : (
+    <View style={st.container}>
+      <View style={[st.topBarBase, { paddingTop: SAFE_TOP }]}>
+        <TouchableOpacity onPress={() => { if (isGenerating) showAlert('退出','对话生成中，确定退出？',[{text:'取消'},{text:'退出',style:'destructive',onPress: async () => { try { await saveSession(); } catch {} finally { onBack(); } }}]); else { saveSession().then(() => onBack()).catch(() => onBack()); } }}><Text style={st.backBtn}>← 返回</Text></TouchableOpacity>
+        <View style={{ flex: 1 }}>
+          <Text style={st.topName}>{session.world?.name || '世界'}</Text>
+          <Text style={st.topSub}>{messages.length} 条消息</Text>
+        </View>
+        <TouchableOpacity onPress={() => setShowInfo(!showInfo)}><Text style={st.infoBtn}>☰</Text></TouchableOpacity>
+      </View>
+      {showInfo && (
+        <View style={{ paddingHorizontal: 12, paddingVertical: 8, backgroundColor: isDark ? '#1A2430' : '#E8F0F8' }}>
+          <Text style={{ fontSize: 11, color: isDark ? '#9FB4C8' : '#5A6B7A' }}>长按回复可重新生成 · 下滑可看历史</Text>
+        </View>
+      )}
+      <FlatList ref={flatListRef} data={displayMsgs} renderItem={renderMsg} keyExtractor={(_, i) => String(i)} contentContainerStyle={st.messageList} onScroll={handleScroll} scrollEventThrottle={100} onContentSizeChange={() => { if (isNearBottom.current) scrollToBottom(); }} />
+      {segments.length > 0 && (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, paddingTop: 6, gap: 6 }}>
+          {segments.map((seg, i) => (
+            <TouchableOpacity key={i} onPress={() => { setInputText(prev => prev + (prev ? ' ' : '') + seg.text); setSegments(prev => prev.filter((_, idx) => idx !== i)); }} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? '#1A2430' : '#E8F0F8', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderColor: isDark ? '#3A3428' : '#E8E4DD' }}>
+              <Text style={{ fontSize: 9, color: '#5B9BD5', fontWeight: '700', marginRight: 4 }}>{seg.tag === 'speech' ? '说' : '行动'}</Text>
+              <Text style={{ fontSize: 11, color: isDark ? '#E8DCC8' : '#2D2822' }} numberOfLines={1}>{seg.text.slice(0, 25)}</Text>
+              <Text style={{ fontSize: 9, color: isDark ? '#8A8070' : '#8A8070', marginLeft: 4 }}>✕</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+      <View style={[st.inputBarBase, { paddingBottom: kbVisible ? 0 : bottomInset }]}>
+        <TouchableOpacity onPress={() => commitSegment('speech')} style={{ paddingHorizontal: 6, paddingVertical: 12, marginRight: 2 }}><Text style={{ fontSize: 12, color: '#5B9BD5', fontWeight: '700' }}>说</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => commitSegment('action')} style={{ paddingHorizontal: 6, paddingVertical: 12, marginRight: 4 }}><Text style={{ fontSize: 12, color: '#8A8070', fontWeight: '700' }}>行动</Text></TouchableOpacity>
+        <TextInput style={st.textInput} value={inputText} onChangeText={setInputText} placeholder="输入消息..." placeholderTextColor={isDark ? '#555' : '#bbb'} multiline maxLength={2000} editable={!isGenerating} returnKeyType="send" />
+        <TouchableOpacity style={[st.sendBtn, (!!inputText.trim() || isGenerating) && st.sendBtnOff]} onPress={send} disabled={!!inputText.trim() || segments.length === 0 || isGenerating}>
+          {isGenerating ? <ActivityIndicator size="small" color="#fff" /> : <Text style={st.sendText}>发送</Text>}
+        </TouchableOpacity>
+      </View>
+      <Toast visible={toast.msg !== ''} message={toast.msg} type={toast.type} onHide={() => setToast({msg:'',type:'success'})} />
+    </View>
+    )}
     </FadeIn>
   );
 }
