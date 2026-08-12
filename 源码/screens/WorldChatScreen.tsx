@@ -120,11 +120,11 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
   const attitudes = useRef<Record<string, any>>((session as any).characterAttitudes || {});
   const summaryRef = useRef('');
 
-  // 键盘状态监听：键盘弹出时输入区底部内边距归零（贴键盘），收起时恢复安全区
-  const [kbVisible, setKbVisible] = useState(false);
+  // 键盘状态：自己监听事件拿精确键盘高度（不依赖 KAV 内部计算——不同输入法事件时序会导致残留）
+  const [kbHeight, setKbHeight] = useState(0);
   useEffect(() => {
-    const showSub = Keyboard.addListener('keyboardDidShow', () => setKbVisible(true));
-    const hideSub = Keyboard.addListener('keyboardDidHide', () => setKbVisible(false));
+    const showSub = Keyboard.addListener('keyboardDidShow', (e: any) => setKbHeight(e?.endCoordinates?.height || 0));
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => setKbHeight(0));
     return () => { showSub.remove(); hideSub.remove(); };
   }, []);
 
@@ -361,13 +361,15 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
     </View>
   );
 
-  // 键盘处理：全平台 KAV behavior='padding'（Android 16 edge-to-edge 下 adjustResize 不生效，
-  // 必须由 KAV 处理；padding 模式比 height 模式无残留偏移）
-  const OuterWrap = KeyboardAvoidingView;
+  // 键盘处理：
+  //   iOS：KAV padding（工作正常，保留）
+  //   Android：adjustNothing（不自动调整），自己监听键盘事件手动顶起
+  //   容器 paddingBottom = 键盘高度（精确、无残留）；输入区底部内边距键盘弹出时归零
+  const OuterWrap = Platform.OS === 'ios' ? KeyboardAvoidingView : View;
 
   return (
     <FadeIn style={{ flex: 1 }}>
-    <OuterWrap style={st.container} behavior="padding" keyboardVerticalOffset={0}>
+    <OuterWrap style={[st.container, Platform.OS === 'android' && { paddingBottom: kbHeight }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
       <View style={[st.topBarBase, { paddingTop: SAFE_TOP }]}>
         <TouchableOpacity onPress={() => { if (isGenerating) showAlert('退出','对话生成中，确定退出？',[{text:'取消'},{text:'退出',style:'destructive',onPress: async () => { try { await saveSession(); } catch {} finally { onBack(); } }}]); else { saveSession().then(() => onBack()).catch(() => onBack()); } }}><Text style={st.backBtn}>← 返回</Text></TouchableOpacity>
         <View style={{ flex: 1 }}>
@@ -408,7 +410,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
           ))}
         </View>
       )}
-      <View style={[st.inputBarBase, { paddingBottom: kbVisible ? 0 : bottomInset }]}>
+      <View style={[st.inputBarBase, { paddingBottom: kbHeight > 0 ? 0 : bottomInset }]}>
         <TouchableOpacity onPress={() => commitSegment('speech')} style={{ paddingHorizontal: 6, paddingVertical: 12, marginRight: 2 }}><Text style={{ fontSize: 12, color: '#5B9BD5', fontWeight: '700' }}>说</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => commitSegment('action')} style={{ paddingHorizontal: 6, paddingVertical: 12, marginRight: 4 }}><Text style={{ fontSize: 12, color: '#8A8070', fontWeight: '700' }}>行动</Text></TouchableOpacity>
         <TextInput style={st.textInput} value={inputText} onChangeText={setInputText} placeholder="输入消息..." placeholderTextColor={isDark ? '#555' : '#bbb'} multiline maxLength={2000} editable={!isGenerating} returnKeyType="send" />
