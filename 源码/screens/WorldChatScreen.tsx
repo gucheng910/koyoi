@@ -131,8 +131,9 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
     const hideSub = Keyboard.addListener('keyboardDidHide', () => setKbHeight(0));
     return () => { showSub.remove(); hideSub.remove(); };
   }, []);
-  // 抬升量：键盘实际占用（height+安全区） + 输入区高度（输入区整体需顶到键盘上方）
-  const kbPad = kbHeight > 0 ? kbHeight + bottomInset + inputBarH : 0;
+  // 抬升量：实测校准 = kbHeight + 输入区高度 + 20dp余量
+  // （键盘height少报安全区、输入框高度、不同输入法报告偏差，统一用20dp余量覆盖）
+  const kbPad = kbHeight > 0 ? kbHeight + inputBarH + 20 : 0;
 
   const greetings = ['世界正在苏醒…','墨水尚未干透…','故事即将开始…','角色们正在就位…'];
   const greeting = greetings[Math.floor(Math.random() * greetings.length)];
