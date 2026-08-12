@@ -361,13 +361,13 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
     </View>
   );
 
-  // Android 用 adjustResize 自动处理键盘（windowSoftInputMode），KAV 在 Android 会双重处理导致残留偏移
-  // iOS 用 KAV padding 模式。通过动态组件切换，内部结构完全不变。
-  const OuterWrap = Platform.OS === 'ios' ? KeyboardAvoidingView : View;
+  // 键盘处理：全平台 KAV behavior='padding'（Android 16 edge-to-edge 下 adjustResize 不生效，
+  // 必须由 KAV 处理；padding 模式比 height 模式无残留偏移）
+  const OuterWrap = KeyboardAvoidingView;
 
   return (
     <FadeIn style={{ flex: 1 }}>
-    <OuterWrap style={st.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+    <OuterWrap style={st.container} behavior="padding" keyboardVerticalOffset={0}>
       <View style={[st.topBarBase, { paddingTop: SAFE_TOP }]}>
         <TouchableOpacity onPress={() => { if (isGenerating) showAlert('退出','对话生成中，确定退出？',[{text:'取消'},{text:'退出',style:'destructive',onPress: async () => { try { await saveSession(); } catch {} finally { onBack(); } }}]); else { saveSession().then(() => onBack()).catch(() => onBack()); } }}><Text style={st.backBtn}>← 返回</Text></TouchableOpacity>
         <View style={{ flex: 1 }}>
