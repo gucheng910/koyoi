@@ -1,0 +1,28 @@
+优化: 开启 R8 压缩，APK 32.3MB → 27.5MB
+
+Expo 模板默认 android.enableMinifyInReleaseBuilds 未设置（= false），
+即 R8 代码压缩与资源压缩全关。这是 dex 高达 7.53MB 的直接原因。
+
+实测（arm64-v8a release）：
+  dex   7.53 MB → 3.10 MB  (−59%)
+  APK  32.26 MB → 27.53 MB (−4.73 MB / −15%)
+
+真机验证（R8 会静默破坏反射路径，必须实测）：
+- 启动不崩、桌面正常
+- 打开已有世界（FileSystem + sessionStorage + 知识库加载）
+- 发消息成功（第 10 轮 → 第 11 轮）—— 覆盖 SecureStore、网络、
+  Reanimated、归档
+- 设置页 / 调用诊断页正常
+- 角色 / 创建 / 世界三个 tab 全部正常
+- 全程无 FATAL EXCEPTION，R8 未报 Missing class 警告
+
+残留风险：混淆后崩溃堆栈不可读，需保留
+android/app/build/outputs/mapping/release/mapping.txt 用于反解
+（23.7MB，不随包分发）。反射/动态加载路径只覆盖了主流程，
+后续新增依赖时需重测。
+
+另：本次一并做了 git gc（松散对象 214MB → 0，pack 165 → 130MiB），
+.git 从 379.6MB 收到 130.5MB，回收约 249MB；提交历史与工作树未受影响。
+回收的是历史中 12 个 APK（原始 568MB）造成的膨胀与不可达对象。
+
+验证：tsc 0 错误；jest 21 套件 218 用例通过；真机全流程跑通。
