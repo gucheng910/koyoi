@@ -5,6 +5,7 @@
 // ============================================================
 
 import { chatCompletionSync } from '../../api/deepseek';
+import { withTag } from '../trace';
 import type { ApiConfig, WorldSession, ChatMessage } from '../../types';
 
 export interface RouterDecision {
@@ -264,14 +265,14 @@ export async function routeContent(
       '请输出决策 JSON。',
     ].join('\n');
 
-    const raw = await chatCompletionSync(
+    const raw = await withTag('router', () => chatCompletionSync(
       { ...cfg, thinkingMode: 'disabled', temperature: 0.2, maxTokens: 2048 } as ApiConfig,
       [
         { role: 'system', content: ROUTER_SYSTEM },
         { role: 'user', content: input },
       ],
       { temperature: 0.2, maxTokens: 600 }
-    ).catch(() => null);
+    )).catch(() => null);
 
     if (!raw) return null;
     const match = raw.match(/\{[\s\S]*\}/);

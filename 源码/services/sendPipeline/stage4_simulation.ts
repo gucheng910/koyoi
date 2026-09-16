@@ -8,6 +8,7 @@ import type { Character } from '../../types';
 import type { CharacterAction } from '../characterSimulator';
 import { getWorldState, useWorldSessionStore } from '../../store/worldSessionStore';
 import { useConfigStore } from '../../store/configStore';
+import { withTag } from '../trace';
 
 /**
  * 阶段 4: 角色推演
@@ -126,11 +127,11 @@ export async function runCharacterSimulation(chapterCtx?: any): Promise<Characte
     }
 
     // 一次请求推演全部角色（原先每角色一次，5 人 = 5 次请求 = 首字延迟取 max）
-    const result = await simulateCharactersBatch(
+    const result = await withTag('character-sim', () => simulateCharactersBatch(
       cfg, chars, session.currentScene,
       (session.recentWorldEvents || []).slice(-2).join('；'),
       activeChars.join('、'), store.lastSimResults, simKbContext, behaviorProfiles, dialogueByChar
-    );
+    ));
     const actions = result.actions;
 
     // 好感度累积：基于 store 里的当前值计算，再整体写回（不再就地改 ref 对象）

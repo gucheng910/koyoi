@@ -18,6 +18,7 @@ import { extractNotableEvents, propagateRumors } from '../rumorPropagation';
 import type { WorldSession, ChatMessage, CharacterKnowledge, MemoryItem } from '../../types';
 import type { CharacterAction } from '../characterSimulator';
 import { getWorldState, useWorldSessionStore } from '../../store/worldSessionStore';
+import { withTag, noteTurnError } from '../trace';
 
 export interface PostSendHooksParams {
   updated: ChatMessage[];
@@ -101,7 +102,7 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
   // ═══════════════════════════════════════════════════════
   try {
   if (turn % 5 === 0) {
-    generateWorldPulse({ ...session, worldClock: turn } as any, turn).then(pulse => {
+    withTag('world-pulse', () => generateWorldPulse({ ...session, worldClock: turn } as any, turn)).then(pulse => {
       if (!pulse) return;
       // 用 store 的最新值计算，避免覆盖这期间的其他更新
       const cur = getWorldState().session;
@@ -122,7 +123,7 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
     const cfg = useConfigStore.getState().getActiveConfig();
     if (cfg) {
       const recentTexts = updated.slice(-6).filter((m: any) => !m.isStreaming).map((m: any) => m.content).join('\n');
-      estimateChapterPosition(cfg, session.worldNovelId, session.currentChapter || 0, [recentTexts])
+      withTag('chapter-track', () => estimateChapterPosition(cfg, session.worldNovelId, session.currentChapter || 0, [recentTexts]))
         .then((pos: any) => {
           // setChapter 内含单调性保护：乱序回来的旧结果不会把章节拉回去
           const newCh = shouldAdvanceChapter(getWorldState().session?.currentChapter || 0, pos);
@@ -135,7 +136,7 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
     const mcfg = useConfigStore.getState().getActiveConfig();
     if (mcfg) {
       const simResults = getWorldState().lastSimResults;
-      extractMemories(mcfg.apiKey, mcfg.baseUrl, mcfg.model, updated, simResults)
+      withTag('memory-extract', () => extractMemories(mcfg.apiKey, mcfg.baseUrl, mcfg.model, updated, simResults))
         .then(async (mems: MemoryItem[]) => {
           if (!mems.length) return;
           const cur = getWorldState().session;
@@ -167,7 +168,7 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
         })),
       ];
       const activeList = allChars.slice(0, 6);
-      generateBackgroundInteraction(bcfg, activeList, session.currentScene || '未知场景')
+      withTag('background-interaction', () => generateBackgroundInteraction(bcfg, activeList, session.currentScene || '未知场景'))
         .then((interaction: any) => {
           if (!interaction) return;
           const cur = getWorldState().session;

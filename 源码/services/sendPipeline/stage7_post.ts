@@ -13,6 +13,7 @@
 // ============================================================
 
 import { polishText } from '../../api/deepseek';
+import { withTag } from '../trace';
 import type { WorldSession } from '../../types';
 import type { ApiConfig } from '../../types';
 
@@ -82,7 +83,7 @@ export function postProcessResponse(
     const styleFeatures = session.world?.writingStyle || '';
     const chapterSample = chapterCtx?.chapterText || '';
     if (styleFeatures || chapterSample) {
-      polished = polishText(cfg, body, { styleFeatures, chapterSample })
+      polished = withTag('polish', () => polishText(cfg, body, { styleFeatures, chapterSample }))
         .catch(() => { console.warn('[sendPipeline] polish failed'); return body; });
     }
   }

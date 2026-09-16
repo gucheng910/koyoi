@@ -6,6 +6,7 @@ import { chatCompletionSync } from '../../api/deepseek';
 import type { ChatMessage } from '../../types';
 import type { ApiConfig } from '../../types';
 import { getWorldState, useWorldSessionStore } from '../../store/worldSessionStore';
+import { withTag } from '../trace';
 
 export function maybeGenerateSummary(
   messages: ChatMessage[],
@@ -22,7 +23,7 @@ export function maybeGenerateSummary(
     { role: 'system' as const, content: '将对话压缩为摘要。要求：1) 事件/关系/情感各30字内；2) 必须记录新增角色及玩家与他们的关系进展（如"周芙：新同桌，约了看球"）；3) 已发生的约定、承诺、未完成事项必须保留。' },
     { role: 'user' as const, content: oldMsgs.map(m => (m.role === 'user' ? '玩家' : '') + ':' + m.content.slice(0, 150)).join('\n').slice(0, 8000) },
   ];
-  chatCompletionSync({ ...cfg, thinkingMode: 'disabled' }, sp, { maxTokens: 300, temperature: 0.2 })
+  withTag('summary', () => chatCompletionSync({ ...cfg, thinkingMode: 'disabled' }, sp, { maxTokens: 300, temperature: 0.2 }))
     .then(raw => {
       // 写回前检查：若期间已换世界（closeWorld 清空），丢弃这次迟到结果
       if (raw && raw.length > 20 && getWorldState().session) {

@@ -1,0 +1,37 @@
+功能: 调用追踪与诊断面板（阶段七）
+
+问题：项目有 100 处 console.*，release 构建里全部丢失；已有的 usageStore
+记录了 token/费用/耗时，但**没有子系统归因**——看到某天费用翻倍，你不知道
+这笔钱花在角色推演、抛光、还是世界脉冲上。
+
+新增 源码/services/trace.ts：
+- withTag(tag, fn) 作用域包裹，调用栈式标签栈，嵌套取最内层
+- recordCall 记录 model / 耗时 / token / 费用 / 成功失败 / 归入哪一轮
+- summarizeByTag 按子系统汇总（费用降序），回答「钱花在哪了」
+- 轮次视图：每轮耗时与调用明细
+- exportTrace 导出可粘贴 JSON，供反馈问题时附上
+- 环形缓冲：调用 200 条、轮次 20 条，长会话不会无限增长
+- 纯内存，不落盘不上报
+
+接入点（覆盖全部 11 处 AI 调用）：
+router / character-sim / narrator / polish / summary /
+memory-extract / world-pulse / chapter-track / background-interaction
+
+顺带把 recordUsage 扩展成同时写 usageStore 与 trace，并在
+usageStore 导出 estimateCallCost 供归因复用（避免复制一份定价表）。
+
+新增设置页「调用诊断」：
+- 总计卡片：调用次数 / 费用 / 失败数
+- 「按子系统」页：每个子系统的次数、入出 token、平均耗时、失败数
+- 「按轮次」页：每轮耗时与调用明细
+- 导出按钮一键复制 JSON
+
+新增测试 20 个：
+- trace.test.ts（15）：作用域嵌套与异常弹栈、**并发不串味**、
+  按标签汇总排序、失败留痕、轮次归因、环形上限、导出可解析
+- traceAttribution.test.ts（5）：跑真实管线，断言 router/polish/
+  stage8 各钩子都被归到正确标签，且结果里**没有 other**
+  （若有 other，说明有调用点漏打标签）
+
+验证：tsc 0 错误；jest 15 套件 129 用例通过；
+expo export 成功（670 modules，新增 expo-clipboard）。

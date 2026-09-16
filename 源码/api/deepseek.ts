@@ -4,7 +4,8 @@
 // ============================================================
 
 import type { ApiConfig, ChatMessage, CacheMetrics } from '../types';
-import { useUsageStore } from '../store/usageStore';
+import { useUsageStore, estimateCallCost } from '../store/usageStore';
+import { recordCall } from '../services/trace';
 
 // ---- 缓存指标追踪 ----
 
@@ -351,6 +352,7 @@ function recordUsage(model: string, usageData: any, startTime: number, config: A
   // ?? 而非 ||：完全命中缓存（miss=0）时保持 0，不能回退成 input（否则费用按全量 miss 计，多算）
   const miss = (usageData.prompt_cache_miss_tokens ?? input);
 
+  let costRmb = 0;
   try {
     useUsageStore.getState().record({
       model,
@@ -360,6 +362,38 @@ function recordUsage(model: string, usageData: any, startTime: number, config: A
       cacheMissTokens: miss,
       duration: Date.now() - startTime,
       baseUrl: config.baseUrl,
+    });
+    costRmb = estimateCallCost(model, input, output, hit, miss, config.baseUrl);
+  } catch {}
+
+  // 追踪归因：记录「哪个子系统发出的这次调用」，供诊断面板按子系统看开销
+  try {
+    recordCall({
+      model,
+      startedAt: startTime,
+      durationMs: Date.now() - startTime,
+      ok: true,
+      inputTokens: input,
+      outputTokens: output,
+      cacheHitTokens: hit,
+      costRmb,
+    });
+  } catch {}
+}
+
+/** 记录一次失败的调用（无 usage 可统计，但要在追踪里留痕） */
+export function recordFailedCall(model: string, startTime: number, error: string): void {
+  try {
+    recordCall({
+      model,
+      startedAt: startTime,
+      durationMs: Date.now() - startTime,
+      ok: false,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheHitTokens: 0,
+      costRmb: 0,
+      error,
     });
   } catch {}
 }

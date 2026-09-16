@@ -84,6 +84,21 @@ function emptyDay(): DailyUsage {
   };
 }
 
+/**
+ * 计算一次调用的费用（RMB）。
+ * 导出供 trace 归因复用——避免在别处复制一份定价表。
+ */
+export function estimateCallCost(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+  cacheHitTokens: number,
+  cacheMissTokens: number,
+  baseUrl?: string
+): number {
+  return calcCost(model, inputTokens, outputTokens, cacheHitTokens, cacheMissTokens, baseUrl).totalCostRmb;
+}
+
 function calcCost(model: string, inputTokens: number, outputTokens: number, cacheHitTokens: number, cacheMissTokens: number, baseUrl?: string) {
   // 仅 DeepSeek 官方 API 计算 RMB，其他提供商只记 token
   const isOfficial = !baseUrl || baseUrl.includes('api.deepseek.com');

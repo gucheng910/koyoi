@@ -7,7 +7,9 @@ import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, Switch, ActivityIndicator, Linking, Image, Platform,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { REWARD_IMAGE_URI } from '../theme/rewardImage';
+import { summarizeByTag, getTrace, exportTrace } from '../services/trace';
 import { useConfigStore } from '../store/configStore';
 import { usePersonaStore } from '../store/personaStore';
 import { useUsageStore } from '../store/usageStore';
@@ -110,6 +112,7 @@ function MainPage({ isDark, onToggleTheme, onNav }: { isDark: boolean; onToggleT
 
       <Section>
         <Row icon="🔑" label="API 配置" value="DeepSeek V4" onPress={()=>onNav('api')} dark={isDark} />
+        <Row icon="📊" label="调用诊断" value="按子系统看开销" onPress={()=>onNav('diagnostics')} dark={isDark} />
         <Row icon="❤️" label="赞赏" value="支持 Koyoi" onPress={()=>onNav('reward')} dark={isDark} />
         <Row icon="ℹ️" label="关于" value={"v" + (Constants.expoConfig?.version || '2.19.0')} onPress={()=>onNav('about')} dark={isDark} last />
       </Section>
@@ -241,6 +244,149 @@ function AboutPage({ isDark, onBack }: { isDark: boolean; onBack: () => void }) 
   );
 }
 
+// ── 诊断（阶段七）──
+//
+// 项目有 100 处 console.*，release 构建里全丢。这个页面把 trace 记录的
+// 「哪个子系统花了多少钱/多少时间/失败几次」呈现出来，支持导出。
+function DiagnosticsPage({ isDark, onBack }: { isDark: boolean; onBack: () => void }) {
+  const c = colors(isDark);
+  const [tab, setTab] = useState<'cost' | 'turns'>('cost');
+  const [copied, setCopied] = useState('');
+
+  // 每次进入/切换时重新读取（trace 在内存里，非响应式）
+  const summary = summarizeByTag();
+  const trace = getTrace();
+  const totalCost = summary.reduce((a, r) => a + r.costRmb, 0);
+  const totalCalls = summary.reduce((a, r) => a + r.calls, 0);
+  const totalErrors = summary.reduce((a, r) => a + r.errors, 0);
+
+  const fmtCost = (v: number) => (v < 0.01 ? '¥' + v.toFixed(4) : '¥' + v.toFixed(3));
+  const fmtTok = (v: number) => (v >= 1000 ? (v / 1000).toFixed(1) + 'k' : String(v));
+
+  const doExport = async () => {
+    try {
+      const json = exportTrace();
+      await Clipboard.setStringAsync(json);
+      setCopied('已复制到剪贴板');
+    } catch {
+      setCopied('复制失败');
+    }
+    setTimeout(() => setCopied(''), 2000);
+  };
+
+  return (
+    <ScrollView style={{ flex: 1, backgroundColor: c.bg }} showsVerticalScrollIndicator={false}>
+      <TouchableOpacity onPress={onBack} style={{ paddingLeft: 20, paddingTop: SAFE_TOP, paddingBottom: 12 }}>
+        <Text style={{ fontSize: 15, color: '#5B9BD5' }}>← 设置</Text>
+      </TouchableOpacity>
+
+      <Text style={{ fontSize: 20, fontWeight: '700', color: c.text, paddingHorizontal: 20, marginBottom: 4 }}>调用诊断</Text>
+      <Text style={{ fontSize: 12, color: c.muted, paddingHorizontal: 20, marginBottom: 16, lineHeight: 18 }}>
+        按子系统统计本次运行的 AI 调用开销。数据仅在内存中，不上传。
+      </Text>
+
+      {/* 总计 */}
+      <View style={{ marginHorizontal: 16, padding: 16, borderRadius: 12, backgroundColor: isDark ? '#1A1814' : '#FFFFFF', marginBottom: 16 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+          <View style={{ alignItems: 'center', flex: 1 }}>
+            <Text style={{ fontSize: 20, fontWeight: '700', color: '#5B9BD5' }}>{totalCalls}</Text>
+            <Text style={{ fontSize: 11, color: c.muted, marginTop: 2 }}>调用次数</Text>
+          </View>
+          <View style={{ alignItems: 'center', flex: 1 }}>
+            <Text style={{ fontSize: 20, fontWeight: '700', color: '#5B9BD5' }}>{fmtCost(totalCost)}</Text>
+            <Text style={{ fontSize: 11, color: c.muted, marginTop: 2 }}>费用</Text>
+          </View>
+          <View style={{ alignItems: 'center', flex: 1 }}>
+            <Text style={{ fontSize: 20, fontWeight: '700', color: totalErrors > 0 ? '#ff6b6b' : c.text }}>{totalErrors}</Text>
+            <Text style={{ fontSize: 11, color: c.muted, marginTop: 2 }}>失败</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* 标签页 */}
+      <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 12 }}>
+        {([['cost', '按子系统'], ['turns', '按轮次']] as const).map(([k, label]) => (
+          <TouchableOpacity key={k} onPress={() => setTab(k)}
+            style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8, backgroundColor: tab === k ? '#5B9BD522' : 'transparent', borderWidth: 1, borderColor: tab === k ? '#5B9BD5' : 'transparent' }}>
+            <Text style={{ fontSize: 12, color: tab === k ? '#5B9BD5' : c.muted, fontWeight: tab === k ? '600' : '400' }}>{label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {tab === 'cost' && (
+        <View style={{ marginHorizontal: 16, borderRadius: 12, overflow: 'hidden', backgroundColor: isDark ? '#1A1814' : '#FFFFFF' }}>
+          {summary.length === 0 ? (
+            <Text style={{ padding: 20, fontSize: 12, color: c.muted, textAlign: 'center' }}>还没有调用记录{'\n'}去世界里发一条消息试试</Text>
+          ) : summary.map((r, i) => (
+            <View key={r.tag} style={{ paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: i === 0 ? 0 : StyleSheet.hairlineWidth, borderTopColor: c.sep }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>{SUBSYSTEM_LABEL[r.tag] || r.tag}</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#5B9BD5' }}>{fmtCost(r.costRmb)}</Text>
+              </View>
+              <Text style={{ fontSize: 11, color: c.muted, marginTop: 3 }}>
+                {r.calls} 次 · {fmtTok(r.inputTokens)} 入 / {fmtTok(r.outputTokens)} 出 · 均 {r.avgMs}ms
+                {r.errors > 0 ? ` · ⚠ ${r.errors} 失败` : ''}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {tab === 'turns' && (
+        <View style={{ marginHorizontal: 16, borderRadius: 12, overflow: 'hidden', backgroundColor: isDark ? '#1A1814' : '#FFFFFF' }}>
+          {trace.turns.length === 0 ? (
+            <Text style={{ padding: 20, fontSize: 12, color: c.muted, textAlign: 'center' }}>还没有轮次记录</Text>
+          ) : trace.turns.slice(0, 8).map((t, i) => (
+            <View key={t.turn} style={{ paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: i === 0 ? 0 : StyleSheet.hairlineWidth, borderTopColor: c.sep }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: c.text }}>第 {t.turn + 1} 轮</Text>
+                <Text style={{ fontSize: 12, color: c.muted }}>{t.durationMs}ms · {t.calls.length} 次调用</Text>
+              </View>
+              {t.calls.length > 0 && (
+                <Text style={{ fontSize: 11, color: c.muted, marginTop: 3 }}>
+                  {t.calls.map(c2 => `${SUBSYSTEM_LABEL[String(c2.tag)] || c2.tag} ${c2.durationMs}ms${c2.ok ? '' : '✗'}`).join(' · ')}
+                </Text>
+              )}
+              {t.errors.length > 0 && (
+                <Text style={{ fontSize: 11, color: '#ff6b6b', marginTop: 3 }}>{t.errors.join('; ')}</Text>
+              )}
+            </View>
+          ))}
+        </View>
+      )}
+
+      <TouchableOpacity onPress={doExport} style={{ marginHorizontal: 16, marginTop: 16, paddingVertical: 12, borderRadius: 10, backgroundColor: isDark ? '#25231F' : '#E0E0E0', alignItems: 'center' }}>
+        <Text style={{ fontSize: 14, color: isDark ? '#E8DCC8' : '#333' }}>导出诊断数据</Text>
+      </TouchableOpacity>
+      {copied !== '' && <Text style={{ textAlign: 'center', fontSize: 12, color: '#4caf50', marginTop: 8 }}>{copied}</Text>}
+
+      <Text style={{ fontSize: 11, color: c.muted, paddingHorizontal: 20, marginTop: 16, lineHeight: 16 }}>
+        提示：若某个子系统费用异常偏高，通常是它的输入上下文过长。
+        角色推演与抛光是大头。
+      </Text>
+      <View style={{ height: 40 }} />
+    </ScrollView>
+  );
+}
+
+/** 子系统内部名 → 中文展示名 */
+const SUBSYSTEM_LABEL: Record<string, string> = {
+  'character-sim': '角色推演',
+  'router': '内容路由',
+  'narrator': '正文生成',
+  'polish': '润色',
+  'summary': '对话摘要',
+  'memory-extract': '记忆提取',
+  'memory-resummarize': '记忆压缩',
+  'world-pulse': '世界脉冲',
+  'chapter-track': '章节追踪',
+  'background-interaction': '背景互动',
+  'novel-analyze': '小说分析',
+  'timeline-synth': '时间线合成',
+  'style-analyze': '文风分析',
+  'other': '其他',
+};
+
 const Chip = ({ label, on, onPress, dark }: { label: string; on: boolean; onPress: () => void; dark: boolean }) => <TouchableOpacity style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: on?(dark?'#1A2430':'#E8F0F8'):(dark?'#25231F':'#F0EDE8'), borderWidth: 1, borderColor: on?'#5B9BD5':'transparent' }} onPress={onPress}><Text style={{ fontSize: 11, fontWeight: on?'600':'400', color: on?'#5B9BD5':(dark?'#8A8070':'#8A8070') }}>{label}</Text></TouchableOpacity>;
 
 export default function SettingsScreen({ isDark, onToggleTheme }: Props) {
@@ -248,5 +394,6 @@ export default function SettingsScreen({ isDark, onToggleTheme }: Props) {
   if (page==='api') return <ApiPage isDark={isDark} onBack={()=>setPage('main')} />;
   if (page==='reward') return <RewardPage isDark={isDark} onBack={()=>setPage('main')} />;
   if (page==='about') return <AboutPage isDark={isDark} onBack={()=>setPage('main')} />;
+  if (page==='diagnostics') return <DiagnosticsPage isDark={isDark} onBack={()=>setPage('main')} />;
   return <MainPage isDark={isDark} onToggleTheme={onToggleTheme} onNav={setPage} />;
 }
