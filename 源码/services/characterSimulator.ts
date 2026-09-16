@@ -251,7 +251,234 @@ function extractToolCalls(response: string): Array<{ action: string; character_n
 }
 
 /**
+ * 批量推演：一次请求推演全部角色（默认路径）
+ *
+ * 原先每个角色一次请求（Promise.all(N 个)），实测 5 个在场角色 = 5 次请求，
+ * 首字延迟 = max(所有推演)。合并为一次请求后：
+ *   - 请求数 N → 1，首字延迟从 max(N) 降为 1 个往返
+ *   - 顺带解决一致性问题：原先各角色互相不知道对方在想什么，
+ *     一次调用里模型能统筹（谁在回避、谁在逼近）
+ *
+ * 每个角色的档案/情报差仍按角色隔离注入（inactive 角色不带对话情报），
+ * 只是把 N 个 prompt 拼进一个请求。
+ */
+const BATCH_SYSTEM = `你是互动小说的角色推演引擎。下面有若干角色，请**各自独立**推演他们此刻的真实状态。
+
+【关键约束】
+- 每个角色只输出自己的那一份，不要让角色之间"商量"或互相引用
+- 严格保持各角色的信息边界：某个角色若被标注"不在场"，他就不知道当前对话内容
+- 各角色的性格、说话方式、好感度基线互不干扰
+- 你必须为每一个角色都输出一条，顺序与输入一致
+
+【输出格式】只输出一个 JSON 数组，不要任何其他文字、注释或 Markdown：
+[
+  {
+    "name":"角色名（必须与输入完全一致）",
+    "intent":"此刻想做什么（40字以内）",
+    "mood":"表面情绪",
+    "innerThought":"内心独白（20~60字）",
+    "bodyLanguage":"身体语言",
+    "subtext":"潜台词",
+    "emotionalDirection":"warming|cooling|breaking|holding|shifting",
+    "triggerContext":"触发点",
+    "toward":"player/某角色名/none/self",
+    "wantsInteraction":true/false,
+    "affectionDelta":0
+  }
+]
+
+【好感变化规则】（affectionDelta，范围 -100~100）
+- 必须基于性格和处境，不是机械的"对方对你好就升"
+- 害羞/傲娇/防御心重的角色：即使内心被打动，上升也极微小（0.01~0.5），甚至反向
+- 重大事件才驱动大变化（舍身相救 +15~30，触及逆鳞 -20~40，日常闲聊 ±0~2）
+- 好感越高越难涨：60 以上减半，80 以上再减半，95 以上几乎不动
+- 好感可为负；负值时上升更容易
+
+【互动管理】若某角色需要进入或离开当前场景，在数组之后另起一行输出：
+___INTERACTION___ {"action":"pull_in|push_out","character_name":"角色名","narrative":"一句话描述如何出现/离开"}
+
+自然一点。人不是时刻都在高潮——有时候只是累了，有时候在想晚饭吃什么。`;
+
+/** 单个角色的推演资料 */
+export interface SimCharacterInput {
+  name: string;
+  personality: string;
+  deepPersonality?: string;
+  role: string;
+  status: string;
+  goal?: string;
+  relationship: string;
+  interactionState: 'active' | 'inactive';
+}
+
+/** 把单个角色的资料渲染成批量 prompt 里的一段 */
+function renderCharacterBlock(
+  char: SimCharacterInput,
+  idx: number,
+  opts: {
+    scene: string;
+    events: string;
+    activeList: string;
+    prev?: { intent: string; mood: string };
+    kbContext?: string;
+    behaviorProfile?: string;
+    dialogue?: string;
+  }
+): string {
+  const lines: string[] = [`── 角色 ${idx + 1}：${char.name} ──`];
+  lines.push(`性格：${char.personality}`);
+  if (char.deepPersonality) lines.push(`真实性格：${char.deepPersonality}`);
+  lines.push(`身份：${char.role} | 目标：${char.goal || '未知'}`);
+  lines.push(`当前状态：${char.status}`);
+  lines.push(`与玩家的关系：${char.relationship}`);
+  if (opts.kbContext) lines.push(`原著信息：${opts.kbContext}`);
+  if (opts.behaviorProfile) lines.push(`行为画像：${opts.behaviorProfile}`);
+  lines.push(char.interactionState === 'active'
+    ? '处境：与玩家互动中'
+    : '处境：不在玩家视线内，在做自己的事（你不知道当前对话内容）');
+  if (opts.dialogue) lines.push(`你看到的对话：\n${opts.dialogue}`);
+  if (opts.prev) lines.push(`你上一轮的状态：意图:${opts.prev.intent}, 情绪:${opts.prev.mood}`);
+  return lines.join('\n');
+}
+
+/**
+ * 批量推演全部角色（一次 API 调用）
+ */
+export async function simulateCharactersBatch(
+  config: ApiConfig,
+  characters: SimCharacterInput[],
+  scene: string,
+  events: string,
+  activeList: string,
+  prevStates?: Record<string, { intent: string; mood: string }>,
+  kbContexts?: Record<string, string>,
+  behaviorProfiles?: Record<string, string>,
+  dialogueByChar?: Record<string, string>
+): Promise<{ actions: CharacterAction[]; interactionChanges: Array<{ action: string; character_name: string; narrative: string }> }> {
+  if (characters.length === 0) return { actions: [], interactionChanges: [] };
+
+  // 只有 1 个角色时走原路径（prompt 更聚焦，且省掉批量格式的开销）
+  if (characters.length === 1) {
+    const c = characters[0];
+    const prev = prevStates?.[c.name];
+    const mergedKb = [kbContexts?.[c.name], behaviorProfiles?.[c.name]].filter(Boolean).join('\n');
+    const r = await simulateCharacter(
+      config, c, scene, events, c.relationship, c.interactionState, activeList,
+      prev ? `意图:${prev.intent}, 情绪:${prev.mood}` : undefined,
+      mergedKb || undefined, dialogueByChar?.[c.name]
+    );
+    return { actions: r.action ? [r.action] : [], interactionChanges: r.toolCalls };
+  }
+
+  const blocks = characters.map((c, i) => renderCharacterBlock(c, i, {
+    scene, events, activeList,
+    prev: prevStates?.[c.name],
+    kbContext: kbContexts?.[c.name],
+    behaviorProfile: behaviorProfiles?.[c.name],
+    dialogue: dialogueByChar?.[c.name],
+  }));
+
+  const userContent = [
+    `## 此刻场景\n${scene}`,
+    events ? `## 最近事件\n${events}` : '',
+    `## 在场的人\n${activeList}`,
+    '',
+    '## 需要推演的角色',
+    blocks.join('\n\n'),
+    '',
+    `请输出包含 ${characters.length} 条记录的 JSON 数组。`,
+  ].filter(Boolean).join('\n');
+
+  try {
+    const raw = await chatCompletionSync(
+      { ...config, thinkingMode: 'disabled' },
+      [
+        { role: 'system' as const, content: BATCH_SYSTEM },
+        { role: 'user' as const, content: userContent },
+      ],
+      // 每个角色约需 200 token，留 1.5 倍余量，设下限防止单角色时过小
+      { maxTokens: Math.max(800, characters.length * 320), temperature: 0.9 }
+    );
+
+    const actions: CharacterAction[] = [];
+    const interactionChanges: Array<{ action: string; character_name: string; narrative: string }> = [];
+
+    // 解析 JSON 数组
+    const arrMatch = raw.match(/\[[\s\S]*\]/);
+    if (arrMatch) {
+      try {
+        const parsed = JSON.parse(arrMatch[0]);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            const name = String(item?.name || '').trim();
+            // 只接受输入里出现过的角色名，防止模型编造
+            const known = characters.find(c => c.name === name);
+            if (!known) continue;
+            actions.push({
+              name,
+              intent: item.intent || '',
+              mood: item.mood || '平静',
+              innerThought: item.innerThought || '',
+              bodyLanguage: item.bodyLanguage || '',
+              subtext: item.subtext || '',
+              emotionalDirection: item.emotionalDirection || 'holding',
+              triggerContext: item.triggerContext || '',
+              toward: item.toward || 'none',
+              wantsInteraction: !!item.wantsInteraction,
+              affectionDelta: typeof item.affectionDelta === 'number' ? item.affectionDelta : 0,
+            });
+          }
+        }
+      } catch { /* 数组损坏，走下面的兜底 */ }
+    }
+
+    // 兜底：模型没输出合法数组时，退回逐角色请求（至少保证不丢整轮推演）
+    if (actions.length === 0) {
+      console.warn('[SIM] batch parse failed, falling back to per-character');
+      return simulateCharacters(config, characters, scene, events, activeList, prevStates, kbContexts, behaviorProfiles, dialogueByChar);
+    }
+
+    // 缺失的角色补一条空动作（保持与输入等长，下游按名字取值）
+    const got = new Set(actions.map(a => a.name));
+    for (const c of characters) {
+      if (!got.has(c.name)) {
+        actions.push({
+          name: c.name, intent: '', mood: '平静', innerThought: '', bodyLanguage: '',
+          subtext: '', emotionalDirection: 'holding', triggerContext: '', toward: 'none',
+          wantsInteraction: false, affectionDelta: 0,
+        });
+      }
+    }
+
+    // 互动变更标记
+    const interRe = /___INTERACTION___\s*(\{[^\n]*\})/g;
+    let m: RegExpExecArray | null;
+    while ((m = interRe.exec(raw)) !== null) {
+      try {
+        const obj = JSON.parse(m[1]);
+        const nm = String(obj.character_name || '');
+        if (characters.some(c => c.name === nm)) {
+          interactionChanges.push({
+            action: obj.action || '',
+            character_name: nm,
+            narrative: obj.narrative || '',
+          });
+        }
+      } catch { /* 跳过坏行 */ }
+    }
+
+    return { actions, interactionChanges };
+  } catch (e) {
+    console.warn('[SIM] batch failed, falling back to per-character: ' + (e instanceof Error ? e.message : String(e)));
+    return simulateCharacters(config, characters, scene, events, activeList, prevStates, kbContexts, behaviorProfiles, dialogueByChar);
+  }
+}
+
+/**
  * 并行模拟：每个角色独立输出意图（不编排行动，留给主AI）
+ *
+ * 注意：这是 N 次请求的实现，仅作为 simulateCharactersBatch 的兜底保留。
+ * 正常路径请用 simulateCharactersBatch。
  */
 export async function simulateCharacters(
   config: ApiConfig,

@@ -75,31 +75,17 @@ function parseSpeakers(text: string): { speaker: string; content: string }[] {
   return segments;
 }
 
-function normalizeSession(s: any) {
-  const w = s.world || {};
-  if (!w.rules) w.rules = { physics: '', supernatural: '', technology: '', society: '', morality: '', sexualNorms: '' };
-  if (!w.locations) w.locations = [];
-  if (!w.timeline) w.timeline = [];
-  if (!w.characters) w.characters = [];
-  s.world = w;
-  if (!s.selectedCharacters) s.selectedCharacters = [];
-  if (!s.npcs) s.npcs = [];
-  if (!s.messages) s.messages = [];
-  if (!s.worldLog) s.worldLog = [];
-  return s;
-}
 
 export default function WorldChatScreen({ session: initialSession, onBack, isDark }: Props) {
   const st = T(isDark);
   const bottomInset = useSafeBottom();
 
   // ---- 会话状态来自 store（原先是 useState + 6 个手工同步的 useRef）----
+  // 只订阅渲染真正要用的字段；activeChars / attitudes / summary 由服务层
+  // 直接读 store，组件订阅它们只会带来无谓的重渲染。
   const session = useWorldSessionStore(s => s.session) ?? initialSession;
   const messages = useWorldSessionStore(s => s.messages);
   const turnCount = useWorldSessionStore(s => s.turnCount);
-  const activeChars = useWorldSessionStore(s => s.activeChars);
-  const attitudes = useWorldSessionStore(s => s.attitudes);
-  const summary = useWorldSessionStore(s => s.summary);
 
   const [inputText, setInputText] = useState('');
   const [segments, setSegments] = useState<{text: string; tag: string}[]>([]);
@@ -266,7 +252,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
 
       if (raw) {
         // 阶段 7: 响应后处理
-        const { displayText, newNpcs, scene } = await postProcessResponse(raw, session, cfg, chapterCtx);
+        const { displayText, newNpcs, scene, polished } = postProcessResponse(raw, session, cfg, chapterCtx);
         if (newNpcs) {
           for (const npc of newNpcs) {
             const cur = getWorldState().session;
@@ -299,6 +285,23 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
 
         // 阶段 8: 后处理钩子（内部从 store 读取状态与回合数）
         runPostSendHooks({ updated, saveSession, charActions, userMsg });
+
+        // 抛光在后台进行：正文已经渲染给用户了，完成后原地替换该条消息。
+        // 若期间用户又发了一轮，消息数组会变长——按引用定位那条消息，找不到就丢弃。
+        if (polished) {
+          polished.then(finalText => {
+            if (!finalText || finalText === displayText) return;
+            const state = getWorldState();
+            if (!state.session) return;
+            const list = state.messages;
+            const idx = list.indexOf(msg);
+            if (idx < 0) return;                     // 已被重生成/回退移除
+            const next = [...list];
+            next[idx] = { ...msg, content: finalText };
+            useWorldSessionStore.getState().setMessages(next);
+            saveSession(next);
+          }).catch(() => { /* polish 内部已兜底为原文 */ });
+        }
       }
     } catch (e: any) {
       const msg = e.message || String(e);

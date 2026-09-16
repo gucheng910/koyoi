@@ -2,12 +2,10 @@
 //  发送管线 — 阶段 4: 角色推演
 // ============================================================
 
-import React from 'react';
-import { simulateCharacters } from '../characterSimulator';
+import { simulateCharactersBatch } from '../characterSimulator';
 import { profileToPrompt } from '../characterBehaviorSynthesizer';
-import type { WorldSession, Character } from '../../types';
+import type { Character } from '../../types';
 import type { CharacterAction } from '../characterSimulator';
-import type { ApiConfig } from '../../types';
 import { getWorldState, useWorldSessionStore } from '../../store/worldSessionStore';
 import { useConfigStore } from '../../store/configStore';
 
@@ -127,7 +125,8 @@ export async function runCharacterSimulation(chapterCtx?: any): Promise<Characte
       }
     }
 
-    const result = await simulateCharacters(
+    // 一次请求推演全部角色（原先每角色一次，5 人 = 5 次请求 = 首字延迟取 max）
+    const result = await simulateCharactersBatch(
       cfg, chars, session.currentScene,
       (session.recentWorldEvents || []).slice(-2).join('；'),
       activeChars.join('、'), store.lastSimResults, simKbContext, behaviorProfiles, dialogueByChar
