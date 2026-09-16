@@ -10,6 +10,7 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { REWARD_IMAGE_URI } from '../theme/rewardImage';
 import { summarizeByTag, getTrace, exportTrace } from '../services/trace';
+import { isPeakTime, DEFAULT_MODEL, PRICING } from '../services/pricing';
 import { useConfigStore } from '../store/configStore';
 import { usePersonaStore } from '../store/personaStore';
 import { useUsageStore } from '../store/usageStore';
@@ -79,6 +80,14 @@ function MainPage({ isDark, onToggleTheme, onNav }: { isDark: boolean; onToggleT
   const [showUsage, setShowUsage] = useState(false);
   const [cm, setCm] = useState({ totalCalls:0, hitTokens:0, missTokens:0, lastHitRate:0 });
 
+  // 峰谷状态（DeepSeek 空闲价 = 高峰价的一半，值得让用户看见）
+  const [peakNow, setPeakNow] = useState(() => isPeakTime());
+  useEffect(() => {
+    // 每分钟刷新一次：跨越峰谷边界时提示要跟着变
+    const t = setInterval(() => setPeakNow(isPeakTime()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
   useEffect(() => { s?.load?.(); }, []);
 
   return (
@@ -95,6 +104,14 @@ function MainPage({ isDark, onToggleTheme, onNav }: { isDark: boolean; onToggleT
 
       <Section title="用量">
         <View style={{ backgroundColor: c.card, paddingVertical: 12, paddingHorizontal: 16 }}>
+          {/* 峰谷状态：DeepSeek 空闲价是高峰价的一半，用户需要知道现在按哪档计费 */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 10 }}>
+            <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, backgroundColor: peakNow ? '#ff980022' : '#4caf5022', borderWidth: 1, borderColor: peakNow ? '#ff9800' : '#4caf50' }}>
+              <Text style={{ fontSize: 11, fontWeight: '600', color: peakNow ? '#ff9800' : '#4caf50' }}>
+                {peakNow ? '⚡ 高峰时段 · 全价' : '🌙 空闲时段 · 半价'}
+              </Text>
+            </View>
+          </View>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <View style={{ alignItems: 'center', flex: 1 }}><Text style={{ fontSize: 10, color: c.muted }}>今日</Text><Text style={{ fontSize: 18, fontWeight: '700', color: c.text }}>{fmtK(u.today.inputTokens+u.today.outputTokens)}</Text><Text style={{ fontSize: 9, color: c.muted }}>token</Text></View>
             <View style={{ alignItems: 'center', flex: 1 }}><Text style={{ fontSize: 10, color: c.muted }}>累计</Text><Text style={{ fontSize: 18, fontWeight: '700', color: c.text }}>{fmtK(u.total.inputTokens+u.total.outputTokens)}</Text><Text style={{ fontSize: 9, color: c.muted }}>token</Text></View>
@@ -125,7 +142,7 @@ function ApiPage({ isDark, onBack }: { isDark: boolean; onBack: () => void }) {
   const c = colors(isDark);
       const { configs, activeConfigId, isLoaded, loadConfigs, saveConfig, testConnection } = useConfigStore();
   const [apiKey, setApiKey] = useState(''); const [baseUrl, setBaseUrl] = useState('https://api.deepseek.com');
-  const [model, setModel] = useState('deepseek-v4-flash'); const [thinking, setThinking] = useState<'disabled'|'low'|'high'>('disabled');
+  const [model, setModel] = useState(DEFAULT_MODEL); const [thinking, setThinking] = useState<'disabled'|'low'|'high'>('disabled');
   const [effort, setEffort] = useState<'low'|'high'>('high');
   const [temp, setTemp] = useState('1.3'); const [maxTok, setMaxTok] = useState('4096');
   const [filter, setFilter] = useState<'off'|'moderate'|'strict'>('off');
@@ -177,8 +194,8 @@ function ApiPage({ isDark, onBack }: { isDark: boolean; onBack: () => void }) {
 
       <Section title="模型">
         <View style={{ backgroundColor: c.card, padding: 16 }}>
-          <TextInput style={{ backgroundColor: isDark?'#13110F':'#F0EDE8', borderRadius: 8, padding: 10, color: c.text, fontSize: 14, borderWidth: 1, borderColor: isDark?'#2C2A22':'#E8E4DD', marginBottom: 8 }} value={model} onChangeText={setModel} placeholder="deepseek-v4-flash" placeholderTextColor="#666" autoCapitalize="none" />
-          <View style={{ flexDirection: 'row', gap: 6 }}>{['deepseek-v4-flash','deepseek-v4-pro'].map(m=><Chip key={m} label={m==='deepseek-v4-flash'?'V4 Flash':'V4 Pro'} on={model===m} onPress={()=>setModel(m)} dark={isDark} />)}</View>
+          <TextInput style={{ backgroundColor: isDark?'#13110F':'#F0EDE8', borderRadius: 8, padding: 10, color: c.text, fontSize: 14, borderWidth: 1, borderColor: isDark?'#2C2A22':'#E8E4DD', marginBottom: 8 }} value={model} onChangeText={setModel} placeholder={DEFAULT_MODEL} placeholderTextColor="#666" autoCapitalize="none" />
+          <View style={{ flexDirection: 'row', gap: 6 }}>{MODEL_PRESETS.map(m=><Chip key={m.id} label={m.label} on={model===m.id} onPress={()=>setModel(m.id)} dark={isDark} />)}</View>
           <Text style={{ fontSize: 10, color: c.muted, marginTop: 6 }}>支持任何 OpenAI 兼容 API 的模型名</Text>
         </View>
       </Section>
@@ -250,6 +267,7 @@ function DiagnosticsPage({ isDark, onBack }: { isDark: boolean; onBack: () => vo
   const c = colors(isDark);
   const [tab, setTab] = useState<'cost' | 'turns'>('cost');
   const [copied, setCopied] = useState('');
+  const peakNow = isPeakTime();
 
   // 每次进入/切换时重新读取（trace 在内存里，非响应式）
   const summary = summarizeByTag();
@@ -279,8 +297,12 @@ function DiagnosticsPage({ isDark, onBack }: { isDark: boolean; onBack: () => vo
       </TouchableOpacity>
 
       <Text style={{ fontSize: 20, fontWeight: '700', color: c.text, paddingHorizontal: 20, marginBottom: 4 }}>调用诊断</Text>
-      <Text style={{ fontSize: 12, color: c.muted, paddingHorizontal: 20, marginBottom: 16, lineHeight: 18 }}>
+      <Text style={{ fontSize: 12, color: c.muted, paddingHorizontal: 20, marginBottom: 8, lineHeight: 18 }}>
         按子系统统计本次运行的 AI 调用开销。数据仅在内存中，不上传。
+      </Text>
+      {/* 当前峰谷档位：空闲价是高峰价的一半，费用数字要结合它看 */}
+      <Text style={{ fontSize: 11, color: peakNow ? '#ff9800' : '#4caf50', paddingHorizontal: 20, marginBottom: 16 }}>
+        {peakNow ? '⚡ 当前高峰时段（全价）· 北京时间周一至周五 9-12 / 14-18' : '🌙 当前空闲时段（半价）'}
       </Text>
 
       {/* 总计 */}
@@ -386,6 +408,13 @@ const SUBSYSTEM_LABEL: Record<string, string> = {
 };
 
 const Chip = ({ label, on, onPress, dark }: { label: string; on: boolean; onPress: () => void; dark: boolean }) => <TouchableOpacity style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: on?(dark?'#1A2430':'#E8F0F8'):(dark?'#25231F':'#F0EDE8'), borderWidth: 1, borderColor: on?'#5B9BD5':'transparent' }} onPress={onPress}><Text style={{ fontSize: 11, fontWeight: on?'600':'400', color: on?'#5B9BD5':(dark?'#8A8070':'#8A8070') }}>{label}</Text></TouchableOpacity>;
+
+/**
+ * 模型快捷选项，直接从定价表生成，避免两处模型名不同步。
+ * 官方现名：Flash = `deepseek-flash`（旧名 deepseek-v4-flash 已下线，
+ * 仍可调用但由 V4.1-Flash 提供服务并按 Flash 计费）；Pro = `deepseek-v4-pro`。
+ */
+const MODEL_PRESETS = Object.entries(PRICING).map(([id, p]) => ({ id, label: p.label }));
 
 export default function SettingsScreen({ isDark, onToggleTheme }: Props) {
   const [page, setPage] = useState('main');

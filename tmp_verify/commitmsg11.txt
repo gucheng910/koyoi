@@ -1,0 +1,81 @@
+修复: 更新 DeepSeek 模型与峰谷定价，修正费用计算错误
+
+## 官方现状（抓取 https://api-docs.deepseek.com/zh-cn/quick_start/pricing）
+
+模型：
+- Flash 现名 `deepseek-flash`（DeepSeek-V4.1-Flash）。旧名 deepseek-v4-flash
+  仍可调用但模型已下线，由 V4.1-Flash 提供服务并按 Flash 计费
+- Pro 仍为 `deepseek-v4-pro`（DeepSeek-V4-Pro-0813）
+
+价格（元/百万 tokens，新增峰谷）：
+| | flash空闲 | flash高峰 | pro空闲 | pro高峰 |
+| 输入(命中)   | 0.02 | 0.04 | 0.15 | 0.30 |
+| 输入(未命中) | 1    | 2    | 4.5  | 9.0  |
+| 输出         | 4    | 8    | 13.5 | 27.0 |
+
+峰谷规则：空闲价 = 高峰价的一半；高峰为**北京时间周一至周五**
+9:00-12:00、14:00-18:00，其余空闲。
+
+## 旧定价错在哪
+
+代码里是峰谷生效**之前**的旧价，且完全没有峰谷概念：
+- flash 输出 2.0 → 应为 4/8（少算 2~4 倍）
+- pro 命中 0.025 → 应为 0.15/0.30（少算 6~12 倍）
+- pro 输出 6.0 → 应为 13.5/27（少算 2.25~4.5 倍）
+
+## 「价格总算错」的根因（共 8 条，逐条修掉）
+
+1. 定价表整体过期（见上）
+2. **无峰谷概念** → 高峰时段一律少算 50%
+3. **miss 兜底双重计费** 🔴 —— 原代码
+   `miss = prompt_cache_miss_tokens ?? prompt_tokens`。
+   当 miss 缺失而 hit 存在时，miss 取的是含命中的全量，hit 又照常计入，
+   **命中部分被算两次**，账单虚高。原注释只修了 `miss === 0` 的情况，
+   漏了 `miss === undefined`。改为 `max(0, input - hit)`，
+   并额外兼容 OpenAI 风格 `prompt_tokens_details.cached_tokens`
+4. **两套定价表** —— usageStore 与 costEstimate 各存一份且不一致，
+   导致「预估费用」与「实际记账」互相矛盾。合并到 services/pricing.ts
+5. 默认模型名 `deepseek-v4-flash` 已下线 → 改为 `deepseek-flash`
+6. `pricingFor` 用 `includes('pro')` 模糊匹配，且未知模型**静默回退 flash 价**
+   → 改为显式归一化 + 未识别返回 null（只统计 token，不显示假金额）
+7. `recentCalls.id` 用 `Date.now()`，同毫秒两次调用撞 id → 加随机后缀
+8. `today` 只在 load() 时跨天重置，app 跨天不重启则「今日用量」持续累加
+   → 写入时也检查日期
+
+## 参考的社区项目与取舍
+
+gh search 找到 4 个同类项目，逐一读过：
+- `Dasooul03/dsh-plugin-deepseek-pricing`（3★）：借鉴其**带时间参数的
+  定价查询** `pricesFor(model, at)` 与 tier 标签设计
+- `XQZmeSIR/deepseek-pricing`、`zippleyastronaut/deepseek-pricing`：价格数据
+  是**峰谷生效前的旧价或美元换算**，不可用
+
+**这些项目的价格都不可信，唯一权威是官方页面。** 同时发现
+`isPeakUtc` 只判断小时不判断星期 → 周末会被算成高峰，与官方「周一至周五」
+不符。这条**没有抄**，并专门写了测试钉住。
+
+## 新增测试 51 个（全部做过重新引入 bug 验证）
+
+- pricing.test.ts（38）：价格表与官方逐项一致、谷=峰÷2、
+  模型名归一化、峰谷边界（左闭右开）、周末全天空闲、未知模型不猜价
+- cacheTokenParsing.test.ts（13）：双重计费。复现旧实现 → 7 个用例失败
+- costEstimate.test.ts 扩充（+8）：峰谷使估算翻倍、不可计价时不显示假金额
+
+两条防复发断言：
+1. 六个价格项逐个断言 `offPeak × 2 === peak`（打错一个数就红）
+2. **周六 10:00 必须是空闲** —— 该时刻 UTC 是 02:00，正落在只判小时
+   写死的 `[1,4)` 区间内，只判小时必然误判
+
+## 真机验证（vivo V2425A / Android 16）
+
+- 设置页显示「🌙 空闲时段 · 半价」（22:00 北京时间，判定正确）
+- 模型名已是 `deepseek-flash`，预设按钮 "V4.1 Flash" / "V4 Pro"
+- **新模型名对真实 API 可用**：发送成功，第9轮 → 第10轮，无报错
+- 诊断面板显示「🌙 当前空闲时段（半价）」
+
+费用数字反解验证：用官方空闲价反解四个子系统的隐含命中/未命中拆分，
+四项**全部精确复现**显示费用（¥0.0049 / 0.0026 / 0.0013 / 0.0012），
+反解命中率也符合直觉（角色推演 86%——档案是稳定前缀；内容路由 18%——
+目录每轮都变），四项之和与面板总计一致。
+
+验证：tsc 0 错误；jest 21 套件 218 用例通过；release APK 真机跑通。

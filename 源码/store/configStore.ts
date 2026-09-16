@@ -18,7 +18,7 @@ const createDefaultConfig = (): ApiConfig => ({
   label: '默认配置',
   baseUrl: 'https://api.deepseek.com',
   apiKey: '',
-  model: 'deepseek-v4-flash',
+  model: 'deepseek-flash',
   thinkingMode: 'disabled',
   reasoningEffort: 'high',
   temperature: 1.3,

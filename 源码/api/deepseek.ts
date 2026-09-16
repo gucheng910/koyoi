@@ -361,6 +361,39 @@ function updateCacheMetrics(usage: any) {
 }
 
 /**
+ * 从 API 返回的 usage 中解析出「命中 / 未命中」的输入 token。
+ *
+ * 这是个容易算错的地方，单独抽出来并加测试：
+ *
+ * - DeepSeek 官方会同时返回 `prompt_cache_hit_tokens` 与
+ *   `prompt_cache_miss_tokens`，此时直接采用。
+ * - 但部分 OpenAI 兼容端点**只回 `prompt_tokens`**（可能另有
+ *   `prompt_tokens_details.cached_tokens`）。原实现写成
+ *   `miss = prompt_cache_miss_tokens ?? prompt_tokens`，
+ *   于是当 miss 缺失而 hit 存在时，**命中部分被算两次**
+ *   （miss 取的是含命中的全量，hit 又照常计入）→ 费用偏高。
+ * - 正确兜底：miss = 总量 − 命中量。
+ */
+export function parseCacheTokens(usageData: any): { input: number; hit: number; miss: number } {
+  const input = Number(usageData?.prompt_tokens) || 0;
+
+  // 官方字段优先；兼容 OpenAI 风格的 prompt_tokens_details.cached_tokens
+  const hit = Number(
+    usageData?.prompt_cache_hit_tokens
+    ?? usageData?.prompt_tokens_details?.cached_tokens
+    ?? 0
+  ) || 0;
+
+  const rawMiss = usageData?.prompt_cache_miss_tokens;
+  const miss = (typeof rawMiss === 'number' && Number.isFinite(rawMiss))
+    ? Math.max(0, rawMiss)
+    // 兜底必须扣除命中量，否则命中部分被双重计费
+    : Math.max(0, input - hit);
+
+  return { input, hit, miss };
+}
+
+/**
  * 记录一次调用的用量与归因。
  *
  * @param tag 子系统标签。**必须**由调用方在发起请求时用 captureTag() 捕获后传入，
@@ -368,11 +401,8 @@ function updateCacheMetrics(usage: any) {
  */
 function recordUsage(model: string, usageData: any, startTime: number, config: ApiConfig, tag: string) {
   if (!usageData) return;
-  const input = (usageData.prompt_tokens || 0);
-  const output = (usageData.completion_tokens || 0);
-  const hit = (usageData.prompt_cache_hit_tokens || 0);
-  // ?? 而非 ||：完全命中缓存（miss=0）时保持 0，不能回退成 input（否则费用按全量 miss 计，多算）
-  const miss = (usageData.prompt_cache_miss_tokens ?? input);
+  const { input, hit, miss } = parseCacheTokens(usageData);
+  const output = Number(usageData.completion_tokens) || 0;
 
   let costRmb = 0;
   try {
@@ -384,8 +414,10 @@ function recordUsage(model: string, usageData: any, startTime: number, config: A
       cacheMissTokens: miss,
       duration: Date.now() - startTime,
       baseUrl: config.baseUrl,
+      // 费用取决于调用**发生**的时刻（峰/谷），不能用完成时刻
+      at: startTime,
     });
-    costRmb = estimateCallCost(model, input, output, hit, miss, config.baseUrl);
+    costRmb = estimateCallCost(model, input, output, hit, miss, config.baseUrl, startTime);
   } catch {}
 
   // 追踪归因：记录「哪个子系统发出的这次调用」，供诊断面板按子系统看开销

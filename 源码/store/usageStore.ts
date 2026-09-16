@@ -1,32 +1,20 @@
 // ============================================================
 //  用量追踪 - 今日/累计 token 消耗及 RMB 换算
 //  存储: AsyncStorage + zustand
+//
+//  定价**不在本文件里**——统一由 services/pricing.ts 提供，
+//  因为过去这里和 costEstimate.ts 各存了一份价格表，两者不一致，
+//  导致「预估费用」与「实际记账」互相矛盾。
 // ============================================================
 
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  calcCallCost, isOfficialBaseUrl, tierAt, pricesAt, normalizeModel,
+  DEFAULT_MODEL, type PriceTier,
+} from '../services/pricing';
 
 const USAGE_KEY = '@koyoi_usage';
-
-// DeepSeek V4 官方定价 (RMB/1M tokens)
-// 来源: https://api-docs.deepseek.com/zh-cn/quick_start/pricing
-// Pro 2.5折将于 2026/5/31 后永久生效（3/6元即为永久价）
-const PRICING: Record<string, { input: number; cached: number; output: number }> = {
-  'deepseek-v4-flash': { input: 1.0, cached: 0.02, output: 2.0 },
-  'deepseek-v4-pro':   { input: 3.0, cached: 0.025, output: 6.0 },
-};
-
-/**
- * 按模型名模糊匹配定价：灰度/带版本号的模型名（如 deepseek-v4-pro-0731）
- * 也能正确匹配，避免精确匹配失败后回退 flash 价导致 pro 费用低估
- */
-function pricingFor(model: string) {
-  if (!model) return PRICING['deepseek-v4-flash'];
-  const m = model.toLowerCase();
-  if (m.includes('pro')) return PRICING['deepseek-v4-pro'];
-  if (m.includes('flash')) return PRICING['deepseek-v4-flash'];
-  return PRICING['deepseek-v4-flash'];
-}
 
 export interface DailyUsage {
   date: string;          // YYYY-MM-DD
@@ -66,14 +54,14 @@ export interface CallRecord {
   duration?: number;     // ms
 }
 
-function todayKey(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+/** 本地日期键（YYYY-MM-DD）。按设备本地时区，符合用户对「今天」的直觉。 */
+function todayKey(at: Date = new Date()): string {
+  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
 }
 
-function emptyDay(): DailyUsage {
+function emptyDay(at: Date = new Date()): DailyUsage {
   return {
-    date: todayKey(),
+    date: todayKey(at),
     inputTokens: 0,
     outputTokens: 0,
     cacheHitTokens: 0,
@@ -87,6 +75,9 @@ function emptyDay(): DailyUsage {
 /**
  * 计算一次调用的费用（RMB）。
  * 导出供 trace 归因复用——避免在别处复制一份定价表。
+ *
+ * @param at 调用发生时刻（决定峰/谷价）。默认取当前时间，但记账时
+ *           必须传调用开始时间，否则跨峰谷边界的长请求会算错。
  */
 export function estimateCallCost(
   model: string,
@@ -94,20 +85,38 @@ export function estimateCallCost(
   outputTokens: number,
   cacheHitTokens: number,
   cacheMissTokens: number,
-  baseUrl?: string
+  baseUrl?: string,
+  at: number | Date = Date.now()
 ): number {
-  return calcCost(model, inputTokens, outputTokens, cacheHitTokens, cacheMissTokens, baseUrl).totalCostRmb;
+  return calcCost(model, inputTokens, outputTokens, cacheHitTokens, cacheMissTokens, baseUrl, at).totalCostRmb;
 }
 
-function calcCost(model: string, inputTokens: number, outputTokens: number, cacheHitTokens: number, cacheMissTokens: number, baseUrl?: string) {
-  // 仅 DeepSeek 官方 API 计算 RMB，其他提供商只记 token
-  const isOfficial = !baseUrl || baseUrl.includes('api.deepseek.com');
-  if (!isOfficial) return { inputCostRmb: 0, outputCostRmb: 0, totalCostRmb: 0 };
-  const p = pricingFor(model);
-  const inputMissCost = (cacheMissTokens / 1_000_000) * p.input;
-  const inputHitCost = (cacheHitTokens / 1_000_000) * p.cached;
-  const outputCost = (outputTokens / 1_000_000) * p.output;
-  return { inputCostRmb: inputMissCost + inputHitCost, outputCostRmb: outputCost, totalCostRmb: inputMissCost + inputHitCost + outputCost };
+function calcCost(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+  cacheHitTokens: number,
+  cacheMissTokens: number,
+  baseUrl?: string,
+  at: number | Date = Date.now()
+) {
+  // 仅 DeepSeek 官方 API 计算 RMB，其他提供商价格未知，只记 token
+  if (!isOfficialBaseUrl(baseUrl)) {
+    return { inputCostRmb: 0, outputCostRmb: 0, totalCostRmb: 0, priced: false, tier: tierAt(new Date(at)) };
+  }
+  const when = at instanceof Date ? at : new Date(at);
+  const b = calcCallCost(
+    { cacheHitTokens, cacheMissTokens, outputTokens },
+    model,
+    when
+  );
+  return {
+    inputCostRmb: b.cacheHitCostRmb + b.cacheMissCostRmb,
+    outputCostRmb: b.outputCostRmb,
+    totalCostRmb: b.totalCostRmb,
+    priced: b.priced,
+    tier: b.tier,
+  };
 }
 
 interface UsageState {
@@ -124,6 +133,8 @@ interface UsageState {
     cacheMissTokens: number;
     duration?: number;
     baseUrl?: string;
+    /** 调用发生的时刻（毫秒时间戳），决定峰/谷价。缺省取当前时间 */
+    at?: number;
   }) => void;
   flush: () => Promise<void>;
   reset: () => Promise<void>;
@@ -166,11 +177,14 @@ export const useUsageStore = create<UsageState>((set, get) => ({
 
   record: (rec) => {
     const { usage } = get();
-    const costs = calcCost(rec.model, rec.inputTokens, rec.outputTokens, rec.cacheHitTokens, rec.cacheMissTokens, rec.baseUrl);
+    const at = rec.at ?? Date.now();
+    const costs = calcCost(rec.model, rec.inputTokens, rec.outputTokens, rec.cacheHitTokens, rec.cacheMissTokens, rec.baseUrl, at);
 
     const callRecord: CallRecord = {
-      id: 'c_' + Date.now(),
-      time: Date.now(),
+      // 原来用 'c_' + Date.now()，同一毫秒内的两次调用会撞 id
+      // （React key 冲突）。阶段七的 trace 已用随机后缀规避，这里跟上。
+      id: 'c_' + at.toString(36) + '_' + Math.random().toString(36).slice(2, 8),
+      time: at,
       model: rec.model,
       inputTokens: rec.inputTokens,
       outputTokens: rec.outputTokens,
@@ -180,16 +194,21 @@ export const useUsageStore = create<UsageState>((set, get) => ({
       duration: rec.duration,
     };
 
+    // 跨天重置：原先只在 load() 时检查日期，若 app 跨天不重启，
+    // today 会一直累加，日报表与「今日用量」全部失真。这里在写入时再查一次。
+    const tk = todayKey(new Date(at));
+    const baseToday = usage.today.date === tk ? usage.today : emptyDay(new Date(at));
+
     const newUsage: UsageSnapshot = {
       today: {
-        ...usage.today,
-        inputTokens: usage.today.inputTokens + rec.inputTokens,
-        outputTokens: usage.today.outputTokens + rec.outputTokens,
-        cacheHitTokens: usage.today.cacheHitTokens + rec.cacheHitTokens,
-        cacheMissTokens: usage.today.cacheMissTokens + rec.cacheMissTokens,
-        calls: usage.today.calls + 1,
-        inputCostRmb: usage.today.inputCostRmb + costs.inputCostRmb,
-        outputCostRmb: usage.today.outputCostRmb + costs.outputCostRmb,
+        ...baseToday,
+        inputTokens: baseToday.inputTokens + rec.inputTokens,
+        outputTokens: baseToday.outputTokens + rec.outputTokens,
+        cacheHitTokens: baseToday.cacheHitTokens + rec.cacheHitTokens,
+        cacheMissTokens: baseToday.cacheMissTokens + rec.cacheMissTokens,
+        calls: baseToday.calls + 1,
+        inputCostRmb: baseToday.inputCostRmb + costs.inputCostRmb,
+        outputCostRmb: baseToday.outputCostRmb + costs.outputCostRmb,
       },
       total: {
         inputTokens: usage.total.inputTokens + rec.inputTokens,
