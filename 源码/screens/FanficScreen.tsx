@@ -670,7 +670,7 @@ ${isSoul ? '- 魂穿：写出意识进入新身体的错位感。你发现自己
   const startGame = (worldBible?: string, openingScene?: string, npcs?: WorldNpc[], worldState?: string) => {
     if (!worldCard) return;
     const world: World = {
-      id: worldCard.id, name: worldName || worldCard.novelTitle, type: worldCard.worldType, rules: worldCard.rules || { physics: '', supernatural: '', technology: '', society: '', morality: '', culture: '' },
+      id: worldCard.id, name: worldName || worldCard.novelTitle, type: worldCard.worldType, rules: worldCard.rules || { physics: '', supernatural: '', technology: '', society: '', morality: '', sexualNorms: '' },
       locations: worldCard.locations, factions: worldCard.factions,
       timeline: worldCard.timeline.map((e, i) => ({ ...e, id: 'tl_' + i, status: 'pending' as const })),
       inertia: { majorEvents: 0.7, characterFate: 0.5, worldReaction: 0.5 },
@@ -885,7 +885,7 @@ ${isSoul ? '- 魂穿：写出意识进入新身体的错位感。你发现自己
               {parseProgress.total > 0 && (
                 <View style={{ marginBottom: 16, width: '100%' }}>
                   <View style={{ height: 4, backgroundColor: isDark ? '#1A1814' : '#E8E4DD', borderRadius: 2, overflow: 'hidden' }}>
-                    <View style={{ height: 4, width: (parseProgress.current / parseProgress.total * 100) + '%', backgroundColor: '#5B9BD5', borderRadius: 2 }} />
+                    <View style={{ height: 4, width: `${(parseProgress.current / parseProgress.total * 100)}%`, backgroundColor: '#5B9BD5', borderRadius: 2 }} />
                   </View>
                   <Text style={{ fontSize: 11, color: '#8A8070', textAlign: 'center', marginTop: 6 }}>{parseProgress.current}/{parseProgress.total} 块 · 已用 {parseProgress.elapsed} 分钟</Text>
                 </View>

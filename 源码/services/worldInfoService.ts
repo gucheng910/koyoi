@@ -8,6 +8,7 @@ import { chatCompletionSync } from '../api/deepseek';
 import { withSilentRetry } from './retry';
 import type { ChatMessage, WorldSession } from '../types';
 import type { CharacterAction } from './characterSimulator';
+import type { MemoryItem } from '../types';
 
 /**
  * 根据用户输入和最近消息激活相关世界观条目
@@ -68,6 +69,9 @@ export function getWorldInfo(
 
 /**
  * 每10轮提取1-2条关键记忆
+ *
+ * 注意：返回的是结构化 MemoryItem（含 importance/type/weight），不是裸字符串。
+ * 调用方在 stage8_hooks 中直接喂给 reSummarizeMemories / session.memories。
  */
 export async function extractMemories(
   apiKey: string,
@@ -75,7 +79,7 @@ export async function extractMemories(
   model: string,
   messages: ChatMessage[],
   lastSimResults: Record<string, { intent: string; mood: string }>
-): Promise<string[]> {
+): Promise<MemoryItem[]> {
   try {
     const recent = messages.slice(-10).map(m => m.content).join('\n');
     const simData = Object.entries(lastSimResults).map(([k, v]) => `${k}: ${v.intent} (${v.mood})`).join('；');

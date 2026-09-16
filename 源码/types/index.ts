@@ -33,7 +33,13 @@ export type WorldType =
   | 'historical'    // 古风王朝
   | 'campus'        // 校园
   | 'fanfic'        // 同人（从小说导入）
-  | 'wuxia' | 'urban' | 'interstellar' | 'game' | 'supernatural' | 'alternate_history' | 'custom';       // 自定义
+  | 'wuxia'         // 武侠
+  | 'urban'         // 都市异能
+  | 'interstellar'  // 星际科幻
+  | 'game'          // 游戏世界
+  | 'supernatural'  // 灵异/超自然
+  | 'alternate_history'  // 架空历史
+  | 'custom';       // 自定义
 
 export interface WorldRules {
   physics: string;
@@ -42,6 +48,8 @@ export interface WorldRules {
   society: string;
   morality: string;
   sexualNorms: string;
+  /** 文化/风俗（同人分析结果可能提供，预设世界未必填） */
+  culture?: string;
 }
 
 export interface Faction {
@@ -66,6 +74,8 @@ export interface World {
   id: string;
   name: string;
   type: WorldType;
+  /** 世界简介（预设世界卡使用） */
+  description?: string;
   rules: WorldRules;
   locations: { name: string; description: string }[];
   factions: Faction[];
@@ -81,6 +91,8 @@ export interface World {
   };
   writingStyle?: string;
   styleSamples?: string[];
+  /** AI 分析的写作风格特征（句长/节奏/修辞等），用于润色对齐 */
+  styleFeatures?: string;
   customRules?: string;
   abilities?: AbilityState[];  // 能力状态时间线（动态规则系统，同人模式用）
   foreshadows?: Foreshadow[];  // 伏笔清单（同人模式用）
@@ -95,12 +107,15 @@ export interface World {
 export interface Appearance {
   height: string;
   bodyType: string;
-  bust: string;
-  waist: string;
-  hips: string;
+  /** 可选：手动创建的角色未必填写三围 */
+  bust?: string;
+  waist?: string;
+  hips?: string;
   skinTone: string;
   hairStyle: string;
   facialFeatures: string;
+  /** 私密细节描述（预设角色卡 / 卡牌导入使用） */
+  intimateDetails?: string;
 }
 
 export interface Personality {
@@ -110,6 +125,12 @@ export interface Personality {
   habits: string[];
   likes: string[];
   dislikes: string[];
+  /** 深层性格（隐藏的真实面），同人分析 / 预设角色卡使用 */
+  deepTraits?: string[];
+  /** 防御机制，如"用冷漠保护自己" */
+  defenseMechanism?: string;
+  /** 矛盾点，如"表面大大咧咧内心敏感" */
+  contradictions?: string;
   behaviorProfile?: CharacterBehaviorProfile;
   promptOverride?: string;
   _deepProfile?: string;
@@ -118,8 +139,22 @@ export interface Personality {
 export interface Relationship {
   intimacy: number;         // 0-100
   trust: number;            // 0-100
-  arousal: number;          // 0-100
+  arousal?: number;         // 0-100，可选：预设角色卡未必填
+  /** 服从度 0-100，支配/调教模式与卡牌导入使用 */
+  submission?: number;
   status: string;           // 关系状态描述
+}
+
+/** 角色的性向档案（预设角色卡 / 卡牌导入使用） */
+export interface SexualProfile {
+  libido: number;
+  experience: number;
+  dominance: number;
+  kinks?: string[];
+  softLimits?: string[];
+  hardLimits?: string[];
+  sensitiveZones?: string[];
+  sexualResponse?: string;
 }
 
 export interface CharacterMemory {
@@ -151,8 +186,11 @@ export type WorldContext =
   | { type: 'apocalypse'; faction: string; role: string; mutations: string }
   | { type: 'historical'; dynasty: string; rank: string; family: string }
   | { type: 'campus'; grade: string; club: string; socialCircle: string }
+  | { type: 'wuxia'; occupation: string; socialClass: string; sect?: string; martialArt?: string }
+  | { type: 'interstellar'; occupation: string; socialClass: string; faction?: string; ship?: string }
+  | { type: 'game'; occupation: string; socialClass: string; playerClass?: string; guild?: string }
   | { type: 'fanfic'; sourceNovel: string; originalRole: string; originalFate: string }
-  | { type: 'custom'; customFields: Record<string, string> };
+  | { type: 'custom'; customFields: Record<string, string>; sourceNovel?: string; originalRole?: string; originalFate?: string };
 
 export interface AutonomyProfile {
   goals: string[];
@@ -166,9 +204,13 @@ export interface Character {
   worldId: string;
   gender: 'female' | 'male' | 'other';
   age: string;
+  /** 身份/职业。同人分析结果与预设卡片使用；手动创建角色的卡未必有 */
+  role?: string;
   appearance: Appearance;
   personality: Personality;
   relationship: Relationship;
+  /** 性向档案（预设角色卡 / 卡牌导入使用） */
+  sexualProfile?: SexualProfile;
   backstory: string;
   worldContext: WorldContext;
   autonomy: AutonomyProfile;
@@ -278,6 +320,8 @@ export interface FanficWorldCard {
   foreshadows?: Foreshadow[];  // 伏笔清单
   milestones?: RelationshipMilestoneSet[];  // 关系里程碑
   scenes?: SignatureScene[];  // 名场面清单
+  /** 运行时标记：该卡片已被 normalizeAllWorldData 修补过，避免重复修补 */
+  _normalized?: boolean;
 }
 
 // ---- 章节分割 & 存储 ----
@@ -487,6 +531,16 @@ export interface CharacterKnowledge {
   }>;
 }
 
+/** 长期记忆条目（memoryManager 三池检索 + worldInfoService 提取共用） */
+export interface MemoryItem {
+  content: string;
+  importance: number;    // 1-5
+  type: 'core' | 'bedrock';
+  weight: number;
+  lastActivated: number; // timestamp
+  reSummarized?: boolean;
+}
+
 export interface NotableEvent {
   id: string;
   round: number;
@@ -541,14 +595,14 @@ export interface WorldSession {
   worldLog: WorldLogEntry[];
   messages: ChatMessage[];
   createdAt: string;
-  memories?: string[];
+  memories?: MemoryItem[];
   currentChapter?: number;       // 当前所处章节（0-based），同人模式用
   worldNovelId?: string;         // 关联的 NovelStorage worldId，同人模式用
   fanficConfig?: TransmigrationConfig;  // 穿越配置（魂穿/身穿），同人模式用
   timelinePosition?: TimelinePosition;
   worldClock?: number;
   characterMoods?: Record<string, CharacterMoodState>;
-  notableEvents?: string[];
+  notableEvents?: NotableEvent[];
   characterKnowledge?: Record<string, CharacterKnowledge>;
 }
 

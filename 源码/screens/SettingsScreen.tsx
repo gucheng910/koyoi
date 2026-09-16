@@ -38,17 +38,17 @@ function Row({ icon, label, value, onPress, last, dark }: { icon?: string; label
   return <View>{Inner}{!last && <View style={{ marginLeft: icon ? 45 : 16, height: StyleSheet.hairlineWidth, backgroundColor: c.sep }} />}</View>;
 }
 
-function RowSwitch({ icon, label, sub, value, onValueChange, last, dark }: { icon?: string; label: string; sub?: string; value: boolean; onValueChange: (v: boolean) => void; last?: boolean; dark: boolean }) {
+function RowSwitch({ icon, label, sub, value, onValueChange, last, dark, disabled }: { icon?: string; label: string; sub?: string; value: boolean; onValueChange: (v: boolean) => void; last?: boolean; dark: boolean; disabled?: boolean }) {
   const c = colors(dark);
   return (
     <View>
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 16 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 16, opacity: disabled ? 0.45 : 1 }}>
         {icon && <Text style={{ fontSize: 17, marginRight: 12 }}>{icon}</Text>}
         <View style={{ flex: 1 }}>
           <Text style={{ fontSize: 15, color: c.text }}>{label}</Text>
           {sub && <Text style={{ fontSize: 11, color: c.muted, marginTop: 1 }}>{sub}</Text>}
         </View>
-        <Switch value={value} onValueChange={onValueChange} trackColor={{ false: c.switchOff, true: '#5B9BD5' }} thumbColor="#fff" />
+        <Switch value={value} onValueChange={onValueChange} disabled={!!disabled} trackColor={{ false: c.switchOff, true: '#5B9BD5' }} thumbColor="#fff" />
       </View>
       {!last && <View style={{ marginLeft: icon ? 45 : 16, height: StyleSheet.hairlineWidth, backgroundColor: c.sep }} />}
     </View>
@@ -136,7 +136,15 @@ function ApiPage({ isDark, onBack }: { isDark: boolean; onBack: () => void }) {
   useEffect(() => { if (!isLoaded) loadConfigs(); }, [isLoaded]);
   useEffect(() => {
     const a = configs.find(c=>c.id===activeConfigId);
-    if (a) { setApiKey(a.apiKey); setBaseUrl(a.baseUrl); setModel(a.model); setThinking((a.thinkingMode==='enabled'?'high':a.thinkingMode)||'disabled'); setEffort((a.reasoningEffort==='max'?'high':a.reasoningEffort)||'high'); setTemp(String(a.temperature)); setMaxTok(String(a.maxTokens)); setFilter(a.safetyFilter); setStream(a.streamOutput); setPolish(a.autoPolish!==false); }
+    if (a) {
+      // 旧版本（≤v2.16）曾用 thinkingMode='enabled' / reasoningEffort='max'，这里做向后兼容归一化
+      const legacyThinking = a.thinkingMode as string;
+      const legacyEffort = a.reasoningEffort as string;
+      setApiKey(a.apiKey); setBaseUrl(a.baseUrl); setModel(a.model);
+      setThinking(legacyThinking === 'enabled' ? 'high' : a.thinkingMode);
+      setEffort(legacyEffort === 'max' ? 'high' : a.reasoningEffort);
+      setTemp(String(a.temperature)); setMaxTok(String(a.maxTokens)); setFilter(a.safetyFilter); setStream(a.streamOutput); setPolish(a.autoPolish!==false);
+    }
   }, [activeConfigId, configs]);
 
   const save = async () => {
@@ -187,7 +195,7 @@ function ApiPage({ isDark, onBack }: { isDark: boolean; onBack: () => void }) {
       </Section>
 
       <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 16, marginBottom: 20 }}>
-        <TouchableOpacity style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: isDark?'#25231F':'#E0E0E0', alignItems: 'center' }} onPress={async()=>{setTesting(true);try{await testConnection(activeConfigId??'');showFb('success','连接成功')}catch(e:any){showFb('error','失败: '+(e.message||''))}setTesting(false)}} disabled={testing||!apiKey.trim()}>
+        <TouchableOpacity style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: isDark?'#25231F':'#E0E0E0', alignItems: 'center' }} onPress={async()=>{setTesting(true);try{const r = await testConnection(); if (r.success) showFb('success', r.message); else showFb('error', r.message);}catch(e:any){showFb('error','失败: '+(e.message||''))}setTesting(false)}} disabled={testing||!apiKey.trim()}>
           {testing?<ActivityIndicator size="small" color="#5B9BD5"/>:<Text style={{ fontSize: 15, fontWeight: '600', color: isDark?'#fff':'#333' }}>测试连接</Text>}
         </TouchableOpacity>
         <TouchableOpacity style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#5B9BD5', alignItems: 'center' }} onPress={save}><Text style={{ fontSize: 15, fontWeight: '600', color: '#fff' }}>保存</Text></TouchableOpacity>

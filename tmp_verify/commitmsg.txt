@@ -1,0 +1,36 @@
+修复: 类型检查清零 + 测试跑起来（阶段一止血）
+
+测试从未运行过：项目缺 babel.config.js 与 jest 配置，4 个测试套件全部
+解析失败（Tests: 0 total）。补上配置后 27 个既有用例全部通过——测试本身
+没坏，只是从没被跑起来。同时 tsconfig 无 include/exclude，tsc 在扫描
+开发脚本/ 下 90 个一次性补丁，真实源码的 80 个错误被噪音淹没。
+
+真实 bug（不是类型噪音）：
+- notableEvents 声明为 string[] 但全程按 NotableEvent 对象使用，
+  导致 propagateRumors 访问 event.round/witnessChars 抛 TypeError，
+  被 stage8 外层 catch 静默吞掉 → 谣言/世界脉冲/章节追踪/记忆提取/
+  背景互动 5 个子系统长期失效。改回 NotableEvent[]。
+- extractMemories 声明返回 string[]、实际返回 MemoryItem[]，类型说谎
+- scenarioInjector 收到 MemoryItem 却按字符串拼接 → 渲染 [object Object]
+- novelAppend: const mergedKB 被重新赋值 + 引用不存在的 saveChapter /
+  KB.styleFeatures → 运行时会崩
+- novelStorage: 补上被调用但不存在的 saveChapter 实现
+- HomeScreen: 4 处 showAlert 缺 buttons 参数，"修复世界"按钮会崩
+- SettingsScreen: testConnection 多传参且忽略返回值 → 失败也提示"连接成功"
+- RowSwitch 收了 disabled 但组件不认 → 流式/润色互斥锁形同虚设
+- 删除 2 处早已失效的 @ts-expect-error
+
+类型补齐（数据比类型丰富）：Personality 深层字段、Character.role /
+sexualProfile、Appearance.intimateDetails、Relationship.submission、
+WorldRules.culture、World.styleFeatures、WorldContext 的 wuxia/
+interstellar/game 变体、WorldType 展开为显式联合。
+
+新增 rumorPropagation.test.ts（9 用例）锁住结构化事件契约；
+新增 CI 跑 tsc + jest。注意 jest 拦不住本类 bug（只剥离类型不做检查），
+已验证改回 string[] 时 tsc 立刻报 15 个错误，所以 tsc 是不可省的一环。
+
+副作用：类型修好后 5 个此前静默失效的子系统会开始工作，属"功能上线"
+而非"修 bug"，提示词长度与 API 成本需实机验证。
+
+注：WorldChatScreen.tsx 同时包含一处无关的键盘手感调参（他人未完成的
+工作），一并提交以避免拆分；该处仅改动 kbPad 一行常量。

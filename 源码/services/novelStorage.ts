@@ -5,7 +5,6 @@
 // ============================================================
 
 import * as FileSystem from 'expo-file-system/legacy';
-// @ts-expect-error Metro bundler handles ESM/CommonJS interop
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ChapterMeta, NovelMeta } from '../types';
 
@@ -122,10 +121,23 @@ export async function createNovel(
 }
 
 /**
+ * 写入单章正文（追加上传时逐章落盘）
+ * 路径约定与 createNovel 保持一致：koyoi_novels/<worldId>/chapters/0001.txt
+ */
+export async function saveChapter(
+  worldId: string,
+  chapterIndex: number,
+  text: string
+): Promise<void> {
+  const dir = await ensureNovelDir(worldId);
+  const chPath = dir + `chapters/${String(chapterIndex).padStart(4, '0')}.txt`;
+  await FileSystem.writeAsStringAsync(chPath, text, { encoding: FileSystem.EncodingType.UTF8 });
+}
+
+/**
  * 读取小说元数据
  */
-export async function getNovelMeta(worldId: string): Promise<NovelMeta | null> {
-  const index = await loadIndex();
+export async function getNovelMeta(worldId: string): Promise<NovelMeta | null> {  const index = await loadIndex();
   const cached = index[worldId];
   if (cached?.chapters?.length) return cached as NovelMeta;
 

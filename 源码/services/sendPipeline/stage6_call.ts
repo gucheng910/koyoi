@@ -3,11 +3,11 @@
 // ============================================================
 
 import { chatCompletion, chatCompletionSync } from '../../api/deepseek';
-import type { ApiConfig } from '../../types';
+import type { ApiConfig, ChatMessage } from '../../types';
 
 export async function callAI(
   cfg: ApiConfig,
-  prompt: { role: string; content: string }[],
+  prompt: ChatMessage[],
   setStreamingText: (text: string) => void
 ): Promise<string> {
   return new Promise<string>((resolve, reject) => {

@@ -142,21 +142,21 @@ export default function HomeScreen({ isDark, onEnterWorld, onNewWorld, onNewFanf
 
   const handleRepair = async (session: WorldSession) => {
     const cfg = useConfigStore.getState().getActiveConfig();
-    if (!cfg?.apiKey) { showAlert('无法修复', '请先在设置中配置 API Key'); return; }
+    if (!cfg?.apiKey) { showAlert('无法修复', '请先在设置中配置 API Key', [{ text: '好的' }]); return; }
     showAlert('AI 修复', '将用 AI 尝试修复此世界的损坏数据，不会重新扫描小说。是否继续？', [
       { text: '取消', style: 'cancel' },
       { text: '开始修复', onPress: async () => {
         const target = diagnoseError(new Error('Manual repair triggered'), session);
-        if (!target) { showAlert('修复失败', '无法定位损坏字段'); return; }
+        if (!target) { showAlert('修复失败', '无法定位损坏字段', [{ text: '好的' }]); return; }
         try {
           const repaired = await repairWorld(session, target, cfg);
-          if (!repaired || Object.keys(repaired).length === 0) { showAlert('修复失败', 'AI 返回数据不足'); return; }
+          if (!repaired || Object.keys(repaired).length === 0) { showAlert('修复失败', 'AI 返回数据不足', [{ text: '好的' }]); return; }
           const merged = mergeRepair(session, repaired);
           const updated = sessions.map(s => s.id === merged.id ? merged : s);
           setSessions(updated);
           await AsyncStorage.setItem(WORLDS_KEY, JSON.stringify(updated));
           showAlert('修复完成', '世界数据已修复，可以进入了', [{ text: '好的' }]);
-        } catch (e: any) { showAlert('修复失败', e.message || '未知错误'); }
+        } catch (e: any) { showAlert('修复失败', e.message || '未知错误', [{ text: '好的' }]); }
       } },
     ]);
   };

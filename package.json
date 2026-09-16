@@ -8,7 +8,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/koyoi"
+    "url": "https://github.com/gucheng910/koyoi"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^3.1.1",
@@ -36,6 +36,7 @@
     "@types/jest": "^29.5.14",
     "@types/react": "~19.2.2",
     "jest": "^29.7.0",
+    "jest-expo": "~56.0.5",
     "ts-jest": "^29.4.11",
     "typescript": "~6.0.3"
   },
@@ -45,6 +46,15 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "collectCoverageFrom": [
+      "源码/**/*.{ts,tsx}",
+      "!源码/**/*.d.ts"
+    ],
+    "moduleFileExtensions": ["ts", "tsx", "js", "jsx", "json", "node"]
   }
 }

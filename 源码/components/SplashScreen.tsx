@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, Animated, StyleSheet, Dimensions } from 'react-native';
+import type { ViewStyle } from 'react-native';
 
 interface Props { onFinish: () => void; }
 
@@ -45,7 +46,8 @@ export default function SplashScreen({ onFinish }: Props) {
     });
   }, []);
 
-  const dotIn = (anim: Animated.Value) => ({
+  // RN 0.85 的 transform 联合类型收紧了推导，这里显式标注为 Animated 样式
+  const dotIn = (anim: Animated.Value): Animated.WithAnimatedObject<ViewStyle> => ({
     opacity: anim.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 1, 1] }),
     transform: [
       { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-15, 0] }) },

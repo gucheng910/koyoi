@@ -77,8 +77,13 @@ export default function CharacterDetail({ character, onBack, onStart, isDark }: 
           <View style={{ backgroundColor: c.card, padding: 16 }}><Text style={{ fontSize: 13, color: c.text, lineHeight: 21 }}>{character.backstory || '暂无背景故事'}</Text></View>
         </Section>
 
-        <Section title="设定">
-        </Section>
+        {character.sexualProfile && (
+          <Section title="设定">
+            <Row label="欲望" value={character.sexualProfile.libido + '/10'} dark={isDark} />
+            <Row label="经验" value={character.sexualProfile.experience + '/10'} dark={isDark} />
+            <Row label="倾向" value={character.sexualProfile.dominance + '/10'} dark={isDark} />
+          </Section>
+        )}
 
         {character.memories.length > 0 && (
           <Section title="关系里程碑">

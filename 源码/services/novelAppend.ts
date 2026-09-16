@@ -165,7 +165,7 @@ export async function appendToWorld(
 
   // 重新全局合成（包含新事件）
   onProgress?.('正在重新合成时间线...');
-  const mergedKB: KnowledgeBase = {
+  let mergedKB: KnowledgeBase = {
     ...kb,
     chapterCount: mergedChapters.length,
     characters: mergedCharacters,
@@ -194,11 +194,23 @@ export async function appendToWorld(
     }
   } catch { /* 合成失败不影响追加 */ }
 
-  // 更新风格特征
+  // 风格特征附着在 styleProfile 上（KnowledgeBase 没有 styleFeatures 字段，
+  // 该字段属于 FanficWorldCard；此处把新分析结果追加为一条 profile 记录）
   try {
     const newStyle = await analyzeStyleFeatures(config, mergedKB);
-    if (newStyle && kb.styleFeatures) {
-      mergedKB.styleFeatures = kb.styleFeatures + '\n' + newStyle;
+    if (newStyle) {
+      const lastRange = mergedKB.styleProfile[mergedKB.styleProfile.length - 1]?.chapterRange;
+      mergedKB = {
+        ...mergedKB,
+        styleProfile: [
+          ...mergedKB.styleProfile,
+          {
+            chapterRange: lastRange ? [lastRange[1] + 1, mergedChapters.length] : [1, mergedChapters.length],
+            traits: newStyle,
+            samples: [],
+          },
+        ],
+      };
     }
   } catch {}
 

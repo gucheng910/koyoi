@@ -1,4 +1,18 @@
 {
-  "compilerOptions": {},
-  "extends": "expo/tsconfig.base"
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": false,
+    "types": ["jest", "node"],
+    "skipLibCheck": true
+  },
+  "include": ["App.tsx", "index.ts", "源码/**/*.ts", "源码/**/*.tsx"],
+  "exclude": [
+    "node_modules",
+    "开发脚本",
+    "android",
+    "dist-android",
+    "build",
+    ".expo",
+    "发布包"
+  ]
 }

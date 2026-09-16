@@ -281,6 +281,14 @@ export default function CreateScreen({ isDark, onCreated }: Props) {
             id: 'custom_world_' + Date.now(),
             name: worldName.trim(),
             type: worldTypeCreate,
+            rules: {
+              physics: '',
+              supernatural: worldSupernatural || '',
+              technology: '',
+              society: worldSociety || '',
+              morality: '',
+              sexualNorms: '',
+            },
             locations: [], factions: [], timeline: [], inertia: { majorEvents: 0.5, characterFate: 0.5, worldReaction: 0.5 },
             butterflySensitivity: { minor: '', major: '' },
           };

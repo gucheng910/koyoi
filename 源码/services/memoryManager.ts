@@ -4,15 +4,9 @@
 // ============================================================
 
 import { chatCompletionSync } from '../api/deepseek';
+import type { MemoryItem } from '../types';
 
-export interface MemoryItem {
-  content: string;
-  importance: number;    // 1-5
-  type: 'core' | 'bedrock';
-  weight: number;
-  lastActivated: number; // timestamp
-  reSummarized?: boolean;
-}
+export type { MemoryItem };
 
 /**
  * 三池检索：根据当前消息从记忆库中选最相关的条目

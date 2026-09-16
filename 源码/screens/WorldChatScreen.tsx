@@ -98,7 +98,7 @@ function normalizeSession(s: any) {
 }
 
 export default function WorldChatScreen({ session: initialSession, onBack, isDark }: Props) {
-  const st = T(isDark, SAFE_TOP);
+  const st = T(isDark);
   const bottomInset = useSafeBottom();
   const [session, setSession] = useState(initialSession);
   const [messages, setMessages] = useState<ChatMessage[]>(initialSession.messages);
@@ -131,9 +131,9 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
     const hideSub = Keyboard.addListener('keyboardDidHide', () => setKbHeight(0));
     return () => { showSub.remove(); hideSub.remove(); };
   }, []);
-  // 抬升量：实测校准 = kbHeight + 输入区高度 + 20dp余量
-  // （键盘height少报安全区、输入框高度、不同输入法报告偏差，统一用20dp余量覆盖）
-  const kbPad = kbHeight > 0 ? kbHeight + inputBarH + 20 : 0;
+  // 抬升量：以真机实际体验校准。用户反馈：kbHeight+bottomInset(301)略紧勉强不遮挡、
+  // +inputBarH(339)稍空、+20(359)空多。取301+10=311（介于两者间，偏不遮挡）
+  const kbPad = kbHeight > 0 ? kbHeight + bottomInset + 10 : 0;
 
   const greetings = ['世界正在苏醒…','墨水尚未干透…','故事即将开始…','角色们正在就位…'];
   const greeting = greetings[Math.floor(Math.random() * greetings.length)];

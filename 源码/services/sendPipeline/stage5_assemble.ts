@@ -23,7 +23,7 @@ import type { CharacterAction } from '../characterSimulator';
 import type { ApiConfig } from '../../types';
 
 export interface PromptResult {
-  prompt: { role: 'system' | 'user' | 'assistant'; content: string }[];
+  prompt: ChatMessage[];
   chapterPrompt: string;
   scenarioBlock: string;
 }
@@ -460,10 +460,11 @@ export async function assemblePrompt(
     historyMsgs = historyMsgs.slice(-HISTORY_LIMIT);
   }
 
-  const prompt = [
-    { role: 'system' as const, content: stableSystem },
-    { role: 'system' as const, content: dynamicSystem },
-    ...historyMsgs.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+  const now = new Date().toISOString();
+  const prompt: ChatMessage[] = [
+    { role: 'system', content: stableSystem, timestamp: now },
+    { role: 'system', content: dynamicSystem, timestamp: now },
+    ...historyMsgs.map((m): ChatMessage => ({ role: m.role as 'user' | 'assistant', content: m.content, timestamp: m.timestamp || now })),
   ];
 
   return { prompt, chapterPrompt, scenarioBlock };

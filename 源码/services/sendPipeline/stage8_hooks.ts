@@ -15,7 +15,7 @@ import { KnowledgeGraph } from '../knowledgeGraph';
 import { decayMoods, updateMoods } from '../emotionalInertia';
 import { generateWorldPulse } from '../worldClock';
 import { extractNotableEvents, propagateRumors } from '../rumorPropagation';
-import type { WorldSession, ChatMessage } from '../../types';
+import type { WorldSession, ChatMessage, CharacterKnowledge, MemoryItem } from '../../types';
 import type { CharacterAction } from '../characterSimulator';
 
 export interface PostSendHooksParams {
@@ -61,16 +61,18 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
   const newEvents = extractNotableEvents(session, lastUserMsg, lastAIRes, turnCount.current);
   const allEvents = [...(session.notableEvents || []), ...newEvents].slice(-20);
 
-  let updatedKnowledge: Record<string, any> | undefined;
+  let updatedKnowledge: Record<string, CharacterKnowledge> | undefined;
   if (allEvents.length > 0) {
     try {
       const kb = session.worldNovelId ? await loadKnowledgeBase(session.worldNovelId) : null;
       if (kb) {
         const graph = new KnowledgeGraph(kb, session.currentChapter || 0);
-        const tempSession = { ...session, notableEvents: allEvents, worldClock: turnCount.current };
-        updatedKnowledge = propagateRumors(tempSession as any, graph);
+        const tempSession: WorldSession = { ...session, notableEvents: allEvents, worldClock: turnCount.current };
+        updatedKnowledge = propagateRumors(tempSession, graph);
       }
-    } catch {}
+    } catch (e) {
+      console.warn('[sendPipeline] rumor propagation failed: ' + (e instanceof Error ? e.message : String(e)));
+    }
   }
 
   // 直接更新 session 对象，确保 saveSession 读到最新值
@@ -119,12 +121,12 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
     const mcfg = useConfigStore.getState().getActiveConfig();
     if (mcfg) {
       extractMemories(mcfg.apiKey, mcfg.baseUrl, mcfg.model, updated, params.lastSimResults.current)
-        .then(async (mems: string[]) => {
+        .then(async (mems: MemoryItem[]) => {
           if (!mems.length) return;
           setSession(prev => {
-            let merged = [...(prev.memories || []), ...mems];
+            const merged = [...(prev.memories || []), ...mems];
             if (merged.length > 25) {
-              reSummarizeMemories(mcfg.apiKey, mcfg.baseUrl, mcfg.model, merged as any).then(compressed => {
+              reSummarizeMemories(mcfg.apiKey, mcfg.baseUrl, mcfg.model, merged).then(compressed => {
                 if (compressed) setSession(p => ({ ...p, memories: compressed.slice(-30) }));
               }).catch(() => { console.warn('[sendPipeline] memory re-summarize failed'); });
             }

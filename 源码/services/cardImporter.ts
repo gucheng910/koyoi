@@ -147,7 +147,7 @@ export function cardToCharacter(card: ImportedCard, worldId?: string): Character
     
     relationship: { intimacy: 0, trust: 0, submission: 0, arousal: 0, status: '' },
     backstory: card.description || '',
-    worldContext: { type: 'custom', sourceNovel: '', originalRole: '', originalFate: '' },
+    worldContext: { type: 'custom', customFields: { 来源卡牌: card.name } },
     autonomy: { goals: [], schedule: '', agency: 5 },
     memories: [],
     exampleDialogues: card.exampleDialogues.map(line => ({ user: '', character: line })),
@@ -173,6 +173,7 @@ export function cardToWorld(card: ImportedCard, worldId?: string): World {
       technology: '',
       society: '',
       morality: '',
+      sexualNorms: '',
     },
     locations: [],
     factions: [],

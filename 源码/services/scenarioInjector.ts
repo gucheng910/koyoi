@@ -5,7 +5,7 @@
 // ============================================================
 
 import { chatCompletionSync } from '../api/deepseek';
-import type { ChatMessage, WorldSession, ApiConfig } from '../types';
+import type { ChatMessage, WorldSession, ApiConfig, MemoryItem } from '../types';
 
 export interface ScenarioContext {
   /** 检索到的相关记忆（1-3 条） */
@@ -27,11 +27,12 @@ export interface ScenarioContext {
  */
 async function recallMemories(
   cfg: Pick<ApiConfig, 'apiKey' | 'baseUrl' | 'model'>,
-  memories: string[],
+  memories: MemoryItem[],
   recentMessages: string
 ): Promise<string[]> {
   if (!memories || memories.length === 0) return [];
-  if (memories.length <= 3) return memories; // 记忆少就直接全取
+  // 记忆少就直接全取（返回正文，供 prompt 拼接）
+  if (memories.length <= 3) return memories.map(m => m.content);
 
   try {
     const prompt = [
@@ -41,7 +42,7 @@ async function recallMemories(
       },
       {
         role: 'user' as const,
-        content: '当前对话：\n' + recentMessages.slice(0, 500) + '\n\n记忆列表：\n' + memories.map((m, i) => (i + 1) + '. ' + m).join('\n'),
+        content: '当前对话：\n' + recentMessages.slice(0, 500) + '\n\n记忆列表：\n' + memories.map((m, i) => (i + 1) + '. ' + m.content).join('\n'),
       },
     ];
     const raw = await chatCompletionSync(
@@ -53,10 +54,10 @@ async function recallMemories(
     return nums
       .filter(n => n >= 1 && n <= memories.length)
       .slice(0, 3)
-      .map(n => memories[n - 1]);
+      .map(n => memories[n - 1].content);
   } catch {
     // 检索失败：取最近的 2 条
-    return memories.slice(-2);
+    return memories.slice(-2).map(m => m.content);
   }
 }
 
