@@ -370,6 +370,13 @@ function DiagnosticsPage({ isDark, onBack }: { isDark: boolean; onBack: () => vo
               {t.errors.length > 0 && (
                 <Text style={{ fontSize: 11, color: '#ff6b6b', marginTop: 3 }}>{t.errors.join('; ')}</Text>
               )}
+              {(t.issues || []).length > 0 && (
+                <View style={{ marginTop: 4 }}>
+                  {(t.issues || []).map((it, k) => (
+                    <Text key={k} style={{ fontSize: 10, color: '#ff9800', lineHeight: 15 }}>⚠ {it}</Text>
+                  ))}
+                </View>
+              )}
             </View>
           ))}
         </View>

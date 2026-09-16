@@ -72,6 +72,8 @@ export interface TurnTrace {
   durationMs: number;
   calls: TraceCall[];
   errors: string[];
+  /** 叙事自检发现的问题（开发期观察，非程序错误） */
+  issues?: string[];
 }
 
 const MAX_CALLS = 200;
@@ -149,6 +151,17 @@ export function endTurn(turn: number): void {
 export function noteTurnError(turn: number, error: string): void {
   const t = state.turns.find(x => x.turn === turn);
   if (t) t.errors.push(error);
+}
+
+/**
+ * 记录一条叙事自检结果（开发期）。
+ * 与 errors 分开存——它不是程序错误，是"输出可能有问题"的观察。
+ */
+export function noteTurnIssue(turn: number, issue: string): void {
+  const t = state.turns.find(x => x.turn === turn);
+  if (!t) return;
+  if (!t.issues) t.issues = [];
+  t.issues.push(issue);
 }
 
 // ── 记录 ──

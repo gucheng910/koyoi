@@ -572,6 +572,29 @@ export interface WorldLogEntry {
   relatedChars?: string[];
 }
 
+/**
+ * 往事回响。
+ *
+ * 存在的理由：状态若只在当轮结算完就消失，"世界"读起来就是一台即时响应的
+ * 状态机——你做什么它立刻反应，你不做它就静止。真实感来自**延迟**：
+ * 第 5 轮说错的话，第 10 轮从别人嘴里、或者在一件不相关的事里冒出来。
+ *
+ * 由 stage8 在提取到值得注意的事件时按概率埋设，到期后由 stage5 注入一次。
+ */
+export interface EchoItem {
+  id: string;
+  /** 源事件发生在第几轮 */
+  sourceRound: number;
+  /** 计划在第几轮浮现 */
+  dueRound: number;
+  /** 回响的种子：源事件的一句话描述 */
+  seed: string;
+  /** 相关角色 */
+  chars: string[];
+  /** 是否已浮现过（浮现一次即作废，避免反复念旧事） */
+  surfaced?: boolean;
+}
+
 export interface TimelinePosition {
   currentEventIndex: number;
   progress: number;
@@ -604,6 +627,8 @@ export interface WorldSession {
   characterMoods?: Record<string, CharacterMoodState>;
   notableEvents?: NotableEvent[];
   characterKnowledge?: Record<string, CharacterKnowledge>;
+  /** 待浮现的往事回响（见 EchoItem） */
+  pendingEchoes?: EchoItem[];
 }
 
 export interface UserPersona {

@@ -16,7 +16,9 @@ import { processInput, maybeGenerateSummary, buildContext, runCharacterSimulatio
 import { routeContent } from '../services/sendPipeline/stage4_5_router';
 import { appendMessages, saveMeta, saveFullSession, loadSession as loadStoredSession } from '../services/sessionStorage';
 import { useWorldSessionStore, getWorldState } from '../store/worldSessionStore';
-import { beginTurn, endTurn } from '../services/trace';
+import { beginTurn, endTurn, noteTurnIssue, noteTurnError } from '../services/trace';
+import { auditNarrative } from '../services/narrativeAudit';
+import { dueEchoes } from '../services/echoes';
 import { recordFeedback as rf } from '../services/feedbackStore';
 import { SAFE_TOP } from '../theme/safeArea';
 import { useSafeBottom } from '../theme/useSafeBottom';
@@ -290,6 +292,35 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
 
         // 阶段 8: 后处理钩子（内部从 store 读取状态与回合数）
         runPostSendHooks({ updated, saveSession, charActions, userMsg });
+
+        // 叙事自检（开发期）：世界是静默运转的，所以它崩坏时也静默——
+        // 用户分不清"微妙地活着"和"没反应"。这里用确定性规则扫一遍输出，
+        // 结果记进 trace，在设置 →「调用诊断」里能看到，不打扰用户。
+        //
+        // 注意：自检**本身**失败必须响亮（记 error 而不是 warning）。
+        // 如果它静默挂掉，就等于又造了一个"静默失效"的子系统——
+        // 正是这个模块要防的事。
+        const auditSession = getWorldState().session;
+        if (auditSession) {
+          try {
+            const knownNames = [
+              ...(auditSession.selectedCharacters || []).map(c => c.name),
+              ...(auditSession.npcs || []).map(n => n.name),
+              ...((auditSession.world as any)?.characters || []).map((c: any) => c.name).filter(Boolean),
+            ];
+            const issues = auditNarrative({
+              output: displayText || raw,
+              session: auditSession,
+              knownNames,
+              injectedEchoes: dueEchoes(auditSession.pendingEchoes, getWorldState().turnCount),
+              declaredNewChars: newNpcs?.map(n => n.name) || [],
+            });
+            for (const it of issues) noteTurnIssue(turn, `${it.kind}: ${it.detail}`);
+          } catch (e) {
+            // 自检挂了要显眼，不能悄悄吞掉
+            noteTurnError(turn, '叙事自检异常: ' + ((e as Error).message || String(e)));
+          }
+        }
 
         // 抛光在后台进行：正文已经渲染给用户了，完成后原地替换该条消息。
         // 若期间用户又发了一轮，消息数组会变长——按引用定位那条消息，找不到就丢弃。

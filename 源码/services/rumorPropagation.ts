@@ -183,20 +183,64 @@ function similarity(a: string, b: string): number {
 }
 
 /**
+ * 决定「信息传播」注入给谁。
+ *
+ * 原先只有 selectedCharacters，但 extractNotableEvents 是把 NPC 也算作目击者
+ * 的（witnessChars 里含 session.npcs）——于是 NPC 的知识被算出来却从不注入，
+ * 永远表现为「我什么都不知道」。
+ *
+ * 而"路人听说了你的事"恰恰是最能让人产生「这世界在自己运转」的瞬间：
+ * 你没告诉任何人，但有人知道了。
+ *
+ * 只取**在场的**（onStage）：不在场的人不需要现在插话。
+ */
+export function resolveKnowledgeTargets(
+  selectedNames: string[],
+  npcNames: string[],
+  onStage: string[]
+): string[] {
+  const stage = onStage && onStage.length > 0 ? new Set(onStage) : null;
+  const selected = new Set(selectedNames);
+  const targets = [...selectedNames];
+  for (const n of npcNames) {
+    if (!n || selected.has(n)) continue;
+    if (stage && !stage.has(n)) continue;   // 不在场的不注入
+    targets.push(n);
+  }
+  return targets;
+}
+
+/**
  * 将角色所知的信息转为 prompt 注入文本
+ *
+ * @param currentRound 当前轮次。**传了它，谣言才会真正"传播"**：
+ *   信息在 propagateRumors 里是按 `learnedAt = 事件轮次 + 跳数` 落库的，
+ *   如果注入时不看这个时间，1 跳和 3 跳的信息会在**同一轮**一起冒出来，
+ *   跳数就白算了。按轮次门控之后，玩家第 5 轮做的事会在第 6/7/8 轮
+ *   陆续从不同人嘴里透出来——这才是"世界在运转"的体感。
+ *   不传则退回旧行为（全部展示）。
  */
 export function knowledgeToPrompt(
   knowledge: Record<string, CharacterKnowledge>,
-  focalChars: string[]
+  focalChars: string[],
+  currentRound: number = Number.POSITIVE_INFINITY
 ): string {
   const relevant = focalChars.filter(name => knowledge[name]?.knownFacts?.length > 0);
   if (relevant.length === 0) return '';
 
-  const lines: string[] = ['【信息传播——角色们知道什么】'];
+  const lines: string[] = [];
 
   for (const name of relevant) {
     const facts = knowledge[name].knownFacts
-      .filter(f => f.certainty > 0.2)
+      // ⚠️ 用 >= 而不是 >：propagateRumors 对 2 跳信息算出的 certainty 恰好是
+      // Math.max(0.1, 0.7 - 2*0.25) = 0.2，严格大于会把它全部滤掉——
+      // 也就是"传了两手、已经开始失真"的那批传闻**永远进不了提示词**，
+      // 而它们恰恰是这个系统最有味道的部分。阈值必须与生成端对齐。
+      .filter(f => f.certainty >= 0.2)
+      // 时间门控：还没"轮到"他知道的信息不注入
+      .filter(f => f.learnedAt === undefined || f.learnedAt <= currentRound)
+      // 越确定的越优先；同确定性下越新的越相关
+      .sort((a, b) => b.certainty - a.certainty)
       .slice(0, 3);
 
     if (facts.length === 0) continue;
@@ -209,5 +253,13 @@ export function knowledgeToPrompt(
     lines.push(`${name}：`, ...factLines);
   }
 
-  return lines.length > 1 ? lines.join('\n') : '';
+  if (lines.length === 0) return '';
+
+  return [
+    '【信息传播——这些角色各自知道什么】',
+    ...lines,
+    '用法：让他们**自然流露**（"我听说……""有人说你……""昨天那事是真的？"），',
+    '不要逐条复述、也不要替他们解释信息的含义。不确定的（"隐约知道"）就说错细节、',
+    '或者记岔了来源。他们不知道的事，就不能知道。',
+  ].join('\n');
 }

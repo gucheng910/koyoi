@@ -17,7 +17,8 @@ import { getRecentBadFeedback, getGoodSamples } from '../feedbackStore';
 import { computeAdjustments, findSimilarSamples } from '../promptTuner';
 import type { PromptAdjustment } from '../promptTuner';
 import { moodsToPrompt } from '../emotionalInertia';
-import { knowledgeToPrompt } from '../rumorPropagation';
+import { knowledgeToPrompt, resolveKnowledgeTargets } from '../rumorPropagation';
+import { dueEchoes, echoesToPrompt } from '../echoes';
 import { directorToPrompt } from '../narrativeDirector';
 import type { WorldSession, ChatMessage } from '../../types';
 import type { CharacterAction } from '../characterSimulator';
@@ -264,10 +265,22 @@ export async function assemblePrompt(
     ? moodsToPrompt(session.characterMoods, session.characterKnowledge)
     : '';
   
-  const focalChars = session.selectedCharacters.map(c => c.name);
+  // 信息传播的注入对象 = 选中角色 + **在场的 NPC**（理由见 resolveKnowledgeTargets）
+  const onStageNames = activeChars && activeChars.length > 0
+    ? activeChars
+    : session.selectedCharacters.map(c => c.name);
+  const focalChars = resolveKnowledgeTargets(
+    session.selectedCharacters.map(c => c.name),
+    (session.npcs || []).map(n => n.name),
+    onStageNames
+  );
   const knowledgeCtx = session.characterKnowledge
-    ? knowledgeToPrompt(session.characterKnowledge, focalChars)
+    ? knowledgeToPrompt(session.characterKnowledge, focalChars, store.turnCount)
     : '';
+
+  // 往事回响：到期的旧事，让它以别的形式浮出来。
+  // 不新增 AI 调用——种子是现成的 notableEvents 描述，这里只是择时注入。
+  const echoCtx = echoesToPrompt(dueEchoes(session.pendingEchoes, store.turnCount));
 
   // 魂穿时能力注入以玩家为主体（"你（陈源）的能力"）
   const fc = (session as any).fanficConfig;
@@ -310,7 +323,10 @@ export async function assemblePrompt(
     sceneContext(session.world, session.currentChapter || 0, session.currentScene || '', session.selectedCharacters.map(c => c.name), selectIds),
     '\n场景：' + sceneLabel,
     moodCtx,
+
     knowledgeCtx,
+
+    echoCtx,
   ];
 
   // 路由器叙事方向（意图/基调/场景线索）

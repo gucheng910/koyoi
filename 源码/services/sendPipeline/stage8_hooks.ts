@@ -18,6 +18,7 @@ import type { WorldSession, ChatMessage, CharacterKnowledge, MemoryItem } from '
 import type { CharacterAction } from '../characterSimulator';
 import { getWorldState, useWorldSessionStore } from '../../store/worldSessionStore';
 import { withTag } from '../trace';
+import { scheduleEchoes, markSurfaced } from '../echoes';
 
 export interface PostSendHooksParams {
   updated: ChatMessage[];
@@ -83,11 +84,22 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
       }
     }
 
+    // 往事回响：把本轮值得注意的事按概率埋下，约定几轮后再浮现。
+    // 这一步是"世界有记性"的来源——没有它，一切都在当轮结算完就消失。
+    const scheduled = scheduleEchoes(session.pendingEchoes, newEvents, turn);
+    // 本轮的 stage5 已经把「到期的」注入过了，这里标记作废，避免下一轮再念一遍。
+    // （stage5 在同一轮里先于 stage8 执行，所以此处按 dueRound <= turn 判定）
+    const surfacedIds = (session.pendingEchoes || [])
+      .filter(e => !e.surfaced && e.dueRound <= turn)
+      .map(e => e.id);
+    const nextEchoes = markSurfaced(scheduled, surfacedIds, turn);
+
     // ── 唯一一次提交 ──
     useWorldSessionStore.getState().patchSession({
       worldClock: nextWorldClock,
       characterMoods: nextMoods,
       notableEvents: nextEvents,
+      pendingEchoes: nextEchoes,
       ...(nextKnowledge ? { characterKnowledge: nextKnowledge } : {}),
     });
   } catch (e) {
