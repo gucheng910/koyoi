@@ -5,7 +5,7 @@
 
 import type { ApiConfig, ChatMessage, CacheMetrics } from '../types';
 import { useUsageStore, estimateCallCost } from '../store/usageStore';
-import { recordCall } from '../services/trace';
+import { recordCall, captureTag } from '../services/trace';
 
 // ---- 缓存指标追踪 ----
 
@@ -42,6 +42,8 @@ export async function chatCompletion(
 ): Promise<string> {
   const { config, messages, onToken, onComplete, onError, signal } = params;
   const startTime = Date.now();
+  // 在发起瞬间捕获子系统标签（并发安全，见 trace.ts 顶部说明）
+  const callTag = captureTag();
 
   const body: any = {
     model: config.model,
@@ -99,12 +101,12 @@ export async function chatCompletion(
     if (!config.streamOutput) {
       const data = await response.json();
       updateCacheMetrics(data.usage);
-      recordUsage(config.model, data.usage, startTime, config);
+      recordUsage(config.model, data.usage, startTime, config, callTag);
 
       // 处理 Function Calling
       const choice = data.choices?.[0];
       if (choice?.message?.tool_calls && params.onToolCall) {
-        const resultText = await handleFunctionCallLoop(config, messages, choice.message.tool_calls, params);
+        const resultText = await handleFunctionCallLoop(config, messages, choice.message.tool_calls, params, callTag);
         return resultText;
       }
 
@@ -114,11 +116,16 @@ export async function chatCompletion(
     }
 
     // 流式：逐行解析 SSE
-    return readStream(response, onToken, onComplete, onError, config.model, startTime, config);
+    return readStream(response, onToken, onComplete, onError, config.model, startTime, config, callTag);
 
   } catch (e: any) {
     if (e.name === 'AbortError') return '';
-    onError?.(new Error('网络连接失败，请检查网络后重试'));
+    // 保留真实原因：原先无论什么错都报「网络连接失败」，导致
+    // 401/404/超时/JSON 解析失败 全部被误报为网络问题，无法定位。
+    const detail = e?.message || String(e);
+    console.warn('[deepseek] chatCompletion failed: ' + e?.name + ' | ' + detail);
+    recordFailedCall(config.model, startTime, detail, callTag);
+    onError?.(new Error('请求失败（' + (e?.name || 'Error') + '）：' + detail));
     return '';
   }
 }
@@ -131,6 +138,11 @@ export async function chatCompletionSync(
   messages: Pick<ChatMessage, 'role' | 'content'>[],
   options?: { temperature?: number; maxTokens?: number; signal?: AbortSignal; tools?: any[]; onToolCall?: (toolCalls: any[]) => Promise<string[]> }
 ): Promise<string> {
+  // 真机诊断发现的 bug：原先调用 recordUsage 时传的是 Date.now()，
+  // 于是 duration = Date.now() - Date.now() ≈ 0，所有非流式调用的耗时都记成 1ms。
+  const startTime = Date.now();
+  // 在发起瞬间捕获子系统标签（并发安全，见 trace.ts 顶部说明）
+  const callTag = captureTag();
   const body: any = {
     model: config.model,
     messages,
@@ -191,7 +203,7 @@ export async function chatCompletionSync(
 
   const data = await response.json();
   updateCacheMetrics(data.usage);
-  recordUsage(config.model, data.usage, Date.now(), config);
+  recordUsage(config.model, data.usage, startTime, config, callTag);
 
   const msg = data.choices?.[0]?.message;
   // 处理 tool calls
@@ -263,7 +275,8 @@ async function readStream(
   onError?: (error: Error) => void,
   model?: string,
   startTime?: number,
-  config?: ApiConfig
+  config?: ApiConfig,
+  tag: string = 'other'
 ): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) throw new Error('无法读取响应流');
@@ -318,7 +331,7 @@ async function readStream(
     // 流结束后统一记录最后一次 usage
     if (finalUsage) {
       updateCacheMetrics(finalUsage);
-      if (model && startTime && config) recordUsage(model, finalUsage, startTime, config);
+      if (model && startTime && config) recordUsage(model, finalUsage, startTime, config, tag);
     }
 
     onComplete?.(fullText);
@@ -326,7 +339,10 @@ async function readStream(
 
   } catch (e: any) {
     if (e.name === 'AbortError') return '';
-    onError?.(new Error('网络连接失败，请检查网络后重试'));
+    // 同上：保留真实原因，不再一律报「网络连接失败」
+    const detail = e?.message || String(e);
+    console.warn('[deepseek] readStream failed: ' + e?.name + ' | ' + detail);
+    onError?.(new Error('流式读取失败（' + (e?.name || 'Error') + '）：' + detail));
     return '';
   }
 }
@@ -344,7 +360,13 @@ function updateCacheMetrics(usage: any) {
   }
 }
 
-function recordUsage(model: string, usageData: any, startTime: number, config: ApiConfig) {
+/**
+ * 记录一次调用的用量与归因。
+ *
+ * @param tag 子系统标签。**必须**由调用方在发起请求时用 captureTag() 捕获后传入，
+ *            不能在这里读全局栈——请求返回时栈顶可能已经是别的子系统（并发污染）。
+ */
+function recordUsage(model: string, usageData: any, startTime: number, config: ApiConfig, tag: string) {
   if (!usageData) return;
   const input = (usageData.prompt_tokens || 0);
   const output = (usageData.completion_tokens || 0);
@@ -369,6 +391,7 @@ function recordUsage(model: string, usageData: any, startTime: number, config: A
   // 追踪归因：记录「哪个子系统发出的这次调用」，供诊断面板按子系统看开销
   try {
     recordCall({
+      tag,
       model,
       startedAt: startTime,
       durationMs: Date.now() - startTime,
@@ -382,10 +405,11 @@ function recordUsage(model: string, usageData: any, startTime: number, config: A
 }
 
 /** 记录一次失败的调用（无 usage 可统计，但要在追踪里留痕） */
-export function recordFailedCall(model: string, startTime: number, error: string): void {
+export function recordFailedCall(model: string, startTime: number, error: string, tag: string = 'other'): void {
   try {
     recordCall({
       model,
+      tag,
       startedAt: startTime,
       durationMs: Date.now() - startTime,
       ok: false,
@@ -404,7 +428,8 @@ async function handleFunctionCallLoop(
   config: ApiConfig,
   messages: ChatMessage[],
   toolCalls: any[],
-  params: ChatCompletionParams
+  params: ChatCompletionParams,
+  tag: string = 'other'
 ): Promise<string> {
   // 执行工具调用
   const toolResults: string[] = [];
@@ -439,6 +464,7 @@ async function handleFunctionCallLoop(
   }));
 
   // 发回 AI 获取最终回复
+  const toolStartTime = Date.now();
   const followUpMsgs: any[] = [...messages, assistantMsg, ...toolMsgs];
   const body: any = {
     model: config.model,
@@ -480,7 +506,7 @@ async function handleFunctionCallLoop(
 
   const data = await response.json();
   updateCacheMetrics(data.usage);
-  recordUsage(config.model, data.usage, Date.now(), config);
+  recordUsage(config.model, data.usage, toolStartTime, config, tag);
   const content = data.choices?.[0]?.message?.content || toolResults.join('\n');
   params.onComplete?.(content);
   return content;

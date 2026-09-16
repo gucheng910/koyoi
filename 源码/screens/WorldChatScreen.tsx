@@ -16,6 +16,7 @@ import { processInput, maybeGenerateSummary, buildContext, runCharacterSimulatio
 import { routeContent } from '../services/sendPipeline/stage4_5_router';
 import { appendMessages, saveMeta, saveFullSession, loadSession as loadStoredSession } from '../services/sessionStorage';
 import { useWorldSessionStore, getWorldState } from '../store/worldSessionStore';
+import { beginTurn, endTurn } from '../services/trace';
 import { recordFeedback as rf } from '../services/feedbackStore';
 import { SAFE_TOP } from '../theme/safeArea';
 import { useSafeBottom } from '../theme/useSafeBottom';
@@ -219,6 +220,10 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
 
     const store = useWorldSessionStore.getState();
     const turn = store.turnCount;
+    // 在本轮**最开头**划定追踪边界。
+    // 原先 beginTurn 放在 stage6(callAI) 里，导致 stage4 的并发调用
+    // （角色推演 / 内容路由）被算进上一轮，诊断面板的「按轮次」视图缺项。
+    beginTurn(turn);
 
     // 阶段 1: 输入处理
     setError(null); setIsGenerating(true); setStreamingText('');
@@ -313,6 +318,8 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
       else setError(msg);
     } finally {
       setIsGenerating(false);
+      // 本轮结束：记录整轮耗时（供诊断面板「按轮次」视图）
+      endTurn(turn);
     }
   }, [isGenerating, session, messages, segments, saveSession]);
 

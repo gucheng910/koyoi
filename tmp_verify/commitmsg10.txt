@@ -1,0 +1,59 @@
+修复: 真机测试发现的 4 个问题（诊断与错误保真）
+
+在 vivo V2425A (Android 16 / arm64) 上安装 release APK 实测，发现并修掉：
+
+1. HTTP 错误被掩埋（最严重）
+   chatCompletion 的 catch 把**任何**异常都替换成「网络连接失败，请检查网络后
+   重试」，真实的 name/message 被丢弃。实机上报这个错时，我用同一个 APK 的
+   设备 shell 验过：curl https://api.deepseek.com/v1/models 返回 401（0.16s），
+   说明网络完全正常 —— 401/404/超时/JSON 解析失败 全长一个样，无法定位。
+   改为保留错误类型与原因，并写入 trace（诊断面板可见失败数）。
+
+2. 非流式调用耗时恒为 ~0ms
+   chatCompletionSync 调 recordUsage 时把 Date.now() 当成了**起始时间**传进去，
+   于是 duration = Date.now() - Date.now() ≈ 0。诊断面板上「内容路由 均 1ms」
+   暴露了这点 —— 一次 API 往返不可能 1ms。handleFunctionCallLoop 同样问题。
+   改为在函数入口捕获 startTime。修后设备实测：内容路由 844ms（原先 1ms）。
+
+3. 归因在并发下串味（我自己上一阶段的 bug）
+   trace 用全局标签栈推断子系统，我在注释里断言「这些调用都是 await 出来的，
+   没有并发交叉写入」——**这个假设是错的**。stage4 是
+       await Promise.all([runCharacterSimulation(), routeContent()])
+   两者并发 push 到同一个栈。先返回的那个在 recordCall 时读到的是后压入的标签，
+   结果是**两个标签互换**（数量各 1 条，看起来完全正常）。
+   真机证据：内容路由被记成「4 次 · 3.2k 出」，而它 max_tokens 只有 600，
+   每次 800 输出是不可能的；同时角色推演只剩 47 出/次。
+   改为在**发起请求那一刻**同步 captureTag()，随调用一路带下去。
+
+4. 轮次边界划错
+   beginTurn 原先在 stage6(callAI) 里，而 stage4 的并发调用发生在此之前，
+   于是角色推演/内容路由被算进上一轮，「按轮次」视图缺项。
+   改为在 send() 最开头划界、finally 里 endTurn。
+
+新增测试 12 个：
+- apiErrorFidelity.test.ts（4）：错误消息必须含真实原因与类型；失败写入 trace；
+  AbortError 仍静默；401 走响应分支
+- callDuration.test.ts（3）：耗时随真实往返变化，不再是 0
+- traceConcurrency.test.ts（6）：并发归因。
+  其中「先压栈的调用先返回」是核心场景——注意必须校验**身份**而非数量，
+  因为归因错乱的表现是两个标签互换，各 1 条，只数个数测不出来。
+
+以上测试都做过「重新引入 bug 验证测试有效性」：
+- 耗时测试：Expected >= 100, Received 0 → 失败 ✓
+- 并发测试：3 个用例失败（token 归属颠倒）✓
+
+设备端最终验证（release APK，非 dev）：
+- 旧数据迁移成功：3 个既有世界完整加载（这是阶段二的迁移逻辑首次跑在真数据上）
+- 完整发送管线跑通，轮次正常递增（第3→4→5→7→8→9轮）
+- 此前静默失效的子系统确实在工作：ROUTER / RUMOR / MOOD / 章节追踪 / 世界脉冲
+  都出现在诊断面板的归因里
+- 诊断面板数字自洽：内容路由 51 出/次（≤ maxTokens 600）、角色推演 1.4k 出/次
+- 按轮次视图：第 8 轮 7203ms · 3 次调用（内容路由 709 / 角色推演 4422 / 正文 2744）
+- 设置页 RowSwitch 的 disabled 修复可见（「流式开启时不可用」）
+
+环境备注（构建，非代码问题）：需要 JDK 17（JDK 25 的 restricted-method 警告会让
+Gradle 误判失败）、Gradle 8.14.3（9.3.1 解析不了 RN gradle-plugin 的版本目录），
+以及把 GRADLE_USER_HOME 用 subst 映射成短路径——否则 CMake 会撞上 Windows
+260 字符路径上限。
+
+验证：tsc 0 错误；jest 19 套件 160 用例通过。

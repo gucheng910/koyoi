@@ -4,18 +4,15 @@
 
 import { chatCompletion, chatCompletionSync } from '../../api/deepseek';
 import type { ApiConfig, ChatMessage } from '../../types';
-import { withTag, beginTurn, endTurn } from '../trace';
-import { getWorldState } from '../../store/worldSessionStore';
+import { withTag } from '../trace';
 
 export async function callAI(
   cfg: ApiConfig,
   prompt: ChatMessage[],
   setStreamingText: (text: string) => void
 ): Promise<string> {
-  // 标记本轮开始：后续所有 AI 调用都归到这一轮
-  const turn = getWorldState().turnCount;
-  beginTurn(turn);
-
+  // 注意：轮次的起点/终点由调用方（WorldChatScreen.send）划定，
+  // 不在本阶段处理——否则 stage4 的并发调用会被算进上一轮。
   return new Promise<string>((resolve, reject) => {
     if (cfg.streamOutput) {
       let full = '';
@@ -29,13 +26,13 @@ export async function callAI(
           const now = Date.now();
           if (now - lastUpdate > 50) { setStreamingText(full); lastUpdate = now; }
         },
-        onComplete: (text) => { setStreamingText(''); endTurn(turn); resolve(text || full); },
-        onError: (e) => { endTurn(turn); reject(e); },
-      })).catch((e) => { endTurn(turn); reject(e); });
+        onComplete: (text) => { setStreamingText(''); resolve(text || full); },
+        onError: reject,
+      })).catch(reject);
     } else {
       withTag('narrator', () => chatCompletionSync({ ...cfg, thinkingMode: 'disabled' }, prompt, { temperature: 0.8 }))
-        .then((r) => { endTurn(turn); resolve(r); })
-        .catch((e) => { endTurn(turn); reject(e); });
+        .then(resolve)
+        .catch(reject);
     }
   });
 }
