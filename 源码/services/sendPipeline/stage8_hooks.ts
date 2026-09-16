@@ -42,51 +42,64 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
   const turn = useWorldSessionStore.getState().bumpTurn();
   console.log('[PIPELINE] stage8 hooks start turn=' + turn);
 
-  // hooks 整体保护：任一子逻辑抛错不得中断后续（保存已在 send 主流程完成，hooks 失败不影响数据）
+  // ═══════════════════════════════════════════════════════
+  //  同步阶段：全部派生值先在局部算好，最后一次提交
+  //
+  //  之前是 4 次分散写入（worldClock / moods / moods / 其余），
+  //  中途抛错会留下「半提交」状态。收敛为单次 patchSession 后，
+  //  要么全生效、要么完全不生效。
+  // ═══════════════════════════════════════════════════════
   try {
+    const nextWorldClock = (session.worldClock || 0) + 1;
 
-  useWorldSessionStore.getState().patchSession({ worldClock: (session.worldClock || 0) + 1 });
-
-  // 情绪惯性：将角色推演结果同步到情绪系统
-  if (charActions && charActions.length > 0) {
-    const updatedMoodsFromActions = updateMoods(charActions, session.characterMoods || {}, turn);
-    useWorldSessionStore.getState().setMoods(updatedMoodsFromActions);
-    console.log('[MOOD] updated from ' + Object.keys(updatedMoodsFromActions).length + ' chars');
-  }
-
-  // 情绪衰减（即使没有推演结果也执行）
-  // 注意：读 store 最新值而非上面那份 session 快照——moods 可能刚被更新
-  const updatedMoods = decayMoods(
-    getWorldState().session?.characterMoods || {},
-    turn
-  );
-
-  const lastUserMsg = userMsg?.content || '';
-  const lastAIRes = updated.length > 0 ? updated[updated.length - 1]?.content || '' : '';
-  const newEvents = extractNotableEvents(session, lastUserMsg, lastAIRes, turn);
-  const allEvents = [...(session.notableEvents || []), ...newEvents].slice(-20);
-
-  let updatedKnowledge: Record<string, CharacterKnowledge> | undefined;
-  if (allEvents.length > 0) {
-    try {
-      const kb = session.worldNovelId ? await loadKnowledgeBase(session.worldNovelId) : null;
-      if (kb) {
-        const graph = new KnowledgeGraph(kb, session.currentChapter || 0);
-        const tempSession: WorldSession = { ...session, notableEvents: allEvents, worldClock: turn };
-        updatedKnowledge = propagateRumors(tempSession, graph);
-      }
-    } catch (e) {
-      console.warn('[sendPipeline] rumor propagation failed: ' + (e instanceof Error ? e.message : String(e)));
+    // 情绪惯性：将角色推演结果同步到情绪系统
+    const moodsAfterActions = (charActions && charActions.length > 0)
+      ? updateMoods(charActions, session.characterMoods || {}, turn)
+      : (session.characterMoods || {});
+    if (charActions && charActions.length > 0) {
+      console.log('[MOOD] updated from ' + Object.keys(moodsAfterActions).length + ' chars');
     }
+
+    // 情绪衰减（即使没有推演结果也执行）——基于刚合并过的 moods
+    const nextMoods = decayMoods(moodsAfterActions, turn);
+
+    const lastUserMsg = userMsg?.content || '';
+    const lastAIRes = updated.length > 0 ? updated[updated.length - 1]?.content || '' : '';
+    const newEvents = extractNotableEvents(session, lastUserMsg, lastAIRes, turn);
+    const nextEvents = [...(session.notableEvents || []), ...newEvents].slice(-20);
+
+    // 谣言传播：失败不阻塞提交（缺少知识库时整段跳过）
+    let nextKnowledge: Record<string, CharacterKnowledge> | undefined;
+    if (nextEvents.length > 0 && session.worldNovelId) {
+      try {
+        const kb = await loadKnowledgeBase(session.worldNovelId);
+        if (kb) {
+          const graph = new KnowledgeGraph(kb, session.currentChapter || 0);
+          const tempSession: WorldSession = { ...session, notableEvents: nextEvents, worldClock: turn };
+          nextKnowledge = propagateRumors(tempSession, graph);
+        }
+      } catch (e) {
+        console.warn('[sendPipeline] rumor propagation failed: ' + (e instanceof Error ? e.message : String(e)));
+      }
+    }
+
+    // ── 唯一一次提交 ──
+    useWorldSessionStore.getState().patchSession({
+      worldClock: nextWorldClock,
+      characterMoods: nextMoods,
+      notableEvents: nextEvents,
+      ...(nextKnowledge ? { characterKnowledge: nextKnowledge } : {}),
+    });
+  } catch (e) {
+    // 同步阶段失败：session 保持提交前状态，不产生半提交
+    console.warn('[sendPipeline] stage8 sync phase failed: ' + (e instanceof Error ? e.message : String(e)));
   }
 
-  // 一次性提交本轮的所有派生状态（不再就地改写 session 对象）
-  useWorldSessionStore.getState().patchSession({
-    characterMoods: updatedMoods,
-    notableEvents: allEvents,
-    ...(updatedKnowledge ? { characterKnowledge: updatedKnowledge } : {}),
-  });
-
+  // ═══════════════════════════════════════════════════════
+  //  异步阶段：以下都是非阻塞的后台任务，各自独立提交。
+  //  每个回调都从 store 重新读取当前值，避免用过期快照覆盖。
+  // ═══════════════════════════════════════════════════════
+  try {
   if (turn % 5 === 0) {
     generateWorldPulse({ ...session, worldClock: turn } as any, turn).then(pulse => {
       if (!pulse) return;
