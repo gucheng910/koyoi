@@ -12,6 +12,7 @@ import { usePersonaStore } from './源码/store/personaStore';
 import { useUsageStore } from './源码/store/usageStore';
 import FadeIn from './源码/components/FadeIn';
 import { ThemeProvider, useTheme } from './源码/theme/ThemeContext';
+import { saveFullSession } from './源码/services/sessionStorage';
 
 import HomeScreen from './源码/screens/HomeScreen';
 import SettingsScreen from './源码/screens/SettingsScreen';
@@ -32,7 +33,6 @@ import type { Character, WorldSession } from './源码/types';
 
 type Tab = 'home' | 'characters' | 'create' | 'settings';
 const THEME_KEY = '@koyoi_theme';
-const WORLDS_KEY = '@koyoi_world_sessions';
 
 export default function App() {
   return (
@@ -113,23 +113,11 @@ function AppContent() {
   const T = theme(isDark);
 
   // ===== 世界持久化辅助 =====
+  // 统一走 sessionStorage（JSONL + 原子写 + 备份），不再在此重复实现一套
+  // AsyncStorage 索引逻辑——原先两处实现字段列表不一致，是数据漂移的来源。
   const saveWorldSession = async (session: WorldSession) => {
     try {
-      // 新格式：独立 key + 索引
-      await AsyncStorage.setItem('@koyoi_session_' + session.id, JSON.stringify(session));
-      const rawIdx = await AsyncStorage.getItem('@koyoi_world_index');
-      const index = rawIdx ? JSON.parse(rawIdx) : {};
-      index[session.id] = {
-        id: session.id,
-        name: session.world?.name || '未知',
-        type: session.world?.type || 'custom',
-        charCount: session.selectedCharacters?.length || 0,
-        msgCount: session.messages?.length || 0,
-        lastActivity: new Date().toISOString(),
-        hasNovelId: !!session.worldNovelId,
-        currentChapter: session.currentChapter || 0,
-      };
-      await AsyncStorage.setItem('@koyoi_world_index', JSON.stringify(index));
+      await saveFullSession(session, session.messages || []);
     } catch (e) { console.warn('[App] saveWorldSession failed:', (e as Error).message); }
   };
 

@@ -61,13 +61,21 @@ async function atomicAppendBatch(filePath: string, lines: string[]) {
 
 // ── 备份 ──
 
+/**
+ * 备份文件到 .backup
+ *
+ * 关键：只有当源文件「非空」时才覆盖备份。
+ * 否则一次失败的写入（把 chat.jsonl 截断成空文件）会连带把上一份好的
+ * 备份也覆盖掉——备份就失去了意义。宁可保留旧备份，也不要保留坏备份。
+ */
 async function backupFile(filePath: string) {
   const backup = filePath + '.backup';
   try {
     const info = await FileSystem.getInfoAsync(filePath);
-    if (info.exists) {
-      await FileSystem.copyAsync({ from: filePath, to: backup });
-    }
+    if (!info.exists) return;
+    const content = await FileSystem.readAsStringAsync(filePath);
+    if (!content || content.trim().length === 0) return;   // 不备份空文件
+    await FileSystem.writeAsStringAsync(backup, content);
   } catch {}
 }
 
@@ -93,12 +101,19 @@ export async function saveFullSession(
   await atomicWrite(chatPath(session.id), jsonl);
 
   // 元数据（记录消息数，供加载时验证）
+  // 注意：messages 在 meta 中置空，其权威副本在 chat.jsonl；
+  // JSON.stringify 会丢弃 undefined 字段，不必手工剔除。
   const meta = {
     ...session,
     messages: undefined,
     _savedMsgCount: messages.length,
     _savedAt: new Date().toISOString(),
   };
+
+  // 必须先落盘 meta.json，再更新索引——否则崩溃后 meta 缺失，
+  // loadSession 只能走 backup 分支（原实现漏掉了这一步）
+  await atomicWrite(metaPath(session.id), JSON.stringify(meta));
+  await backupFile(chatPath(session.id));
 
   // 更新索引
   await updateIndex(session, messages.length);
@@ -154,7 +169,7 @@ export async function loadSession(sessionId: string): Promise<WorldSession | nul
       }
     } catch { /* chat 文件可能为空或不存在 */ }
 
-    // 消息为空但应该有内容 → 从备份恢复
+    // 消息为空但 meta 声称有内容 → 说明 chat.jsonl 被截断，从备份恢复
     if (messages.length === 0 && (meta as any)._savedMsgCount > 0) {
       console.warn('[sessionStorage] meta OK but chat empty, trying backup');
       const backupSession = await loadFromBackup(sessionId);
@@ -163,31 +178,52 @@ export async function loadSession(sessionId: string): Promise<WorldSession | nul
 
     return { ...meta, messages };
   } catch {
-    // 尝试从备份恢复
+    // meta 缺失/损坏 → 尝试从备份恢复
     return loadFromBackup(sessionId);
   }
 }
 
 /**
  * 从备份恢复
+ *
+ * 备份可能只有 chat.jsonl（saveFullSession 首次写入时 meta 尚不存在），
+ * 因此 meta 取「备份优先、实时兜底」，不能硬性要求 meta.json.backup 存在。
  */
 async function loadFromBackup(sessionId: string): Promise<WorldSession | null> {
   try {
-    const metaRaw = await FileSystem.readAsStringAsync(backupPath(sessionId, 'meta.json'));
-    const meta = JSON.parse(metaRaw);
-
+    // 消息：从 chat.jsonl.backup 恢复
     let messages: ChatMessage[] = [];
+    let chatRaw = '';
     try {
-      const chatRaw = await FileSystem.readAsStringAsync(backupPath(sessionId, 'chat.jsonl'));
-      messages = chatRaw.split('\n').filter(line => line.trim()).map(line => JSON.parse(line));
-    } catch {}
-
-    // 恢复备份到正式位置
-    await atomicWrite(metaPath(sessionId), metaRaw);
-    if (messages.length > 0) {
-      await atomicWrite(chatPath(sessionId), messages.map(m => JSON.stringify(m)).join('\n') + '\n');
+      chatRaw = await FileSystem.readAsStringAsync(backupPath(sessionId, 'chat.jsonl'));
+    } catch {
+      return null;   // 连备份都没有，无法恢复
     }
+    for (const line of chatRaw.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (parsed && typeof parsed.role === 'string' && typeof parsed.content === 'string') {
+          messages.push(parsed);
+        }
+      } catch { /* skip corrupt line */ }
+    }
+    if (messages.length === 0) return null;
+
+    // meta：优先用备份，没有则用当前 meta.json
+    let meta: any = null;
+    try {
+      meta = JSON.parse(await FileSystem.readAsStringAsync(backupPath(sessionId, 'meta.json')));
+    } catch {
+      try { meta = JSON.parse(await FileSystem.readAsStringAsync(metaPath(sessionId))); } catch { return null; }
+    }
+    if (!meta || !meta.id) return null;
+
+    // 把好的内容回写正式位置，让下一次加载走正常路径
+    await atomicWrite(metaPath(sessionId), JSON.stringify({ ...meta, _savedMsgCount: messages.length }));
+    await atomicWrite(chatPath(sessionId), messages.map(m => JSON.stringify(m)).join('\n') + '\n');
     console.warn('[sessionStorage] restored from backup:', sessionId);
+
     return { ...meta, messages };
   } catch {
     return null;
@@ -196,12 +232,30 @@ async function loadFromBackup(sessionId: string): Promise<WorldSession | null> {
 
 /**
  * 保存元数据（对话中更新 scene/characters/npcs 等，不包含 messages）
+ *
+ * 保留 meta.json 中已有的 _savedMsgCount / _savedAt——它们是 loadSession
+ * 判断「meta 正常但 chat.jsonl 被截断」的唯一依据，覆盖掉会让损坏检测失效。
  */
 export async function saveMeta(session: WorldSession): Promise<void> {
   await ensureDir(sessionDir(session.id));
   await backupFile(metaPath(session.id));
-  const meta = { ...session, messages: undefined };
+
+  let carried: { _savedMsgCount?: number } = {};
+  try {
+    const prev = JSON.parse(await FileSystem.readAsStringAsync(metaPath(session.id)));
+    if (typeof prev?._savedMsgCount === 'number') {
+      carried = { _savedMsgCount: prev._savedMsgCount };
+    }
+  } catch { /* meta 不存在或损坏，按首次写入处理 */ }
+
+  const meta = {
+    ...session,
+    messages: undefined,
+    ...carried,
+    _savedAt: new Date().toISOString(),
+  };
   await atomicWrite(metaPath(session.id), JSON.stringify(meta));
+  await updateIndex(session, session.messages?.length || carried._savedMsgCount || 0);
 }
 
 /**

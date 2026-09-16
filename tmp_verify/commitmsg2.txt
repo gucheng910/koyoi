@@ -1,0 +1,38 @@
+接线: 启用 sessionStorage（阶段二），废弃 AsyncStorage 全量覆盖
+
+sessionStorage.ts（316 行，JSONL + 原子写 + 备份）写完后从未被任何
+screen 导入，实际在用的是两处手写的 AsyncStorage 全量覆盖：
+App.saveWorldSession 与 WorldChatScreen.saveSession，字段列表还不一致。
+
+- WorldChatScreen: 每轮把整个会话（含全部历史消息）重新 stringify 后
+  整块覆盖写，是 O(n²)；200 轮后既慢又可能撞上 AsyncStorage 单值上限。
+  这正是 plugins/withLargeHeap.js 存在的根因——largeHeap 是症状不是解法。
+- HomeScreen.handleRepair 把修复结果写进 WORLDS_KEY，而该 key 已无人读，
+  等于修复从未持久化。
+- 索引写入用 while 自旋模拟互斥锁：JS 单线程下本无临界区，且一旦
+  finally 未跑到就是死循环。一并删除。
+
+改动：
+- saveSession 改为增量写：新增消息走 appendMessages（只读取+追加尾部），
+  非消息字段走 saveMeta（不触碰 chat.jsonl，开销与消息量无关）。
+- HomeScreen 用 loadIndex/loadSession/deleteSession；handleRepair 改走
+  saveFullSession；新增迁移逻辑兼容两代旧格式。
+- App.saveWorldSession 收敛为调用 saveFullSession，删除重复实现。
+- WorldChatScreen 不再导入 AsyncStorage；App 移除死常量 WORLDS_KEY。
+
+顺带修掉 sessionStorage 自身 3 个此前未被发现的 bug（补测试时暴露）：
+1. saveFullSession 计算了 meta 却从未写盘 → loadSession 只能走 backup 分支
+2. saveMeta 覆盖 meta.json 时冲掉 _savedMsgCount → 损坏检测依据丢失
+3. loadFromBackup 硬性要求 meta.json.backup 存在，而 saveFullSession 首次
+   写入时 meta 尚不存在，导致「chat.jsonl 被截断」永远无法触发恢复；
+   另外 backupFile 会备份空文件，一次坏写入会连带污染上一份好备份。
+   改为：不备份空文件；恢复时 meta 取「备份优先、实时兜底」。
+4. 迁移逻辑最初只处理 per-key 格式，v1 的 @koyoi_world_sessions 数组格式
+   （会话数据内嵌在数组里，没有 per-key 条目）会全部丢失——由迁移测试发现。
+
+新增测试：sessionStorage.test.ts（9）、sessionMigration.test.ts（5），
+用内存文件系统 mock expo-file-system，覆盖往返一致、增量追加、
+截断恢复、两代格式迁移、损坏隔离。
+
+验证：tsc 0 错误；jest 7 套件 50 用例通过；expo export 成功打包
+（663 modules, exit 0）。

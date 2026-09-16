@@ -8,6 +8,12 @@ import { showAlert } from '../components/AnimatedAlert';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useConfigStore } from '../store/configStore';
 import { diagnoseError, repairWorld, mergeRepair } from '../services/worldRepair';
+import {
+  loadIndex as loadSessionIndex,
+  loadSession as loadStoredSession,
+  deleteSession as deleteStoredSession,
+  saveFullSession,
+} from '../services/sessionStorage';
 import type { WorldSession } from '../types';
 import { SAFE_TOP } from '../theme/safeArea';
 import { useSafeBottom } from '../theme/useSafeBottom';
@@ -87,57 +93,83 @@ export default function HomeScreen({ isDark, onEnterWorld, onNewWorld, onNewFanf
   }, []);
 
   useEffect(() => { setConfigured(!!useConfigStore.getState().getActiveConfig()?.apiKey); loadSessions(); }, []);
+
+  /**
+   * 一次性迁移：把旧的 AsyncStorage 格式搬到 JSONL 文件存储。
+   * 兼容两代旧格式：
+   *   v1: @koyoi_world_sessions = [session, ...]（会话本体就在数组里）
+   *   v2: @koyoi_world_index = {id:...} + @koyoi_session_<id> = session
+   * 迁移成功即删除旧 key，避免每轮重复扫描。
+   */
+  const migrateLegacySessions = async (): Promise<void> => {
+    let migrated = 0;
+    try {
+      // ---- v2: per-key 格式 ----
+      const rawIdx = await AsyncStorage.getItem('@koyoi_world_index');
+      if (rawIdx) {
+        const ids = Object.keys(JSON.parse(rawIdx));
+        for (const id of ids) {
+          try {
+            const raw = await AsyncStorage.getItem('@koyoi_session_' + id);
+            if (!raw) continue;
+            const parsed = JSON.parse(raw);
+            if (!parsed?.id || !parsed?.world) continue;
+            await saveFullSession(parsed as WorldSession, parsed.messages || []);
+            await AsyncStorage.removeItem('@koyoi_session_' + id);
+            migrated++;
+          } catch { /* 单条损坏不影响其余 */ }
+        }
+        await AsyncStorage.removeItem('@koyoi_world_index').catch(() => {});
+      }
+
+      // ---- v1: 数组格式（会话数据内嵌，没有独立的 per-key 条目）----
+      const oldRaw = await AsyncStorage.getItem(WORLDS_KEY);
+      if (oldRaw) {
+        const old = JSON.parse(oldRaw);
+        if (Array.isArray(old)) {
+          for (const s of old) {
+            if (!s?.id || !s?.world) continue;
+            try {
+              await saveFullSession(s as WorldSession, s.messages || []);
+              migrated++;
+            } catch { /* 单条损坏不影响其余 */ }
+          }
+        }
+        await AsyncStorage.removeItem(WORLDS_KEY).catch(() => {});
+      }
+    } catch (e) {
+      console.warn('[Home] legacy migration failed:', (e as Error).message);
+    }
+    if (migrated > 0) console.log('[Home] migrated ' + migrated + ' legacy sessions to JSONL storage');
+  };
+
   const loadSessions = async () => {
     try {
-      let rawIdx = await AsyncStorage.getItem('@koyoi_world_index');
-      // 迁移旧数据：@koyoi_world_sessions 数组 → 新的 per-key 格式
-      if (!rawIdx) {
-        const oldRaw = await AsyncStorage.getItem('@koyoi_world_sessions');
-        if (oldRaw) {
-          try {
-            const oldSessions = JSON.parse(oldRaw);
-            if (Array.isArray(oldSessions) && oldSessions.length > 0) {
-              const index: any = {};
-              for (const s of oldSessions) {
-                if (!s?.id || !s?.world) continue;
-                await AsyncStorage.setItem('@koyoi_session_' + s.id, JSON.stringify(s));
-                index[s.id] = { id: s.id, name: s.world?.name || '未知', type: s.world?.type || 'custom', charCount: s.selectedCharacters?.length || 0, msgCount: s.messages?.length || 0, lastActivity: s.createdAt || new Date().toISOString(), hasNovelId: !!s.worldNovelId, currentChapter: s.currentChapter || 0 };
-              }
-              await AsyncStorage.setItem('@koyoi_world_index', JSON.stringify(index));
-              rawIdx = JSON.stringify(index);
-            }
-          } catch {}
-        }
+      let entries = await loadSessionIndex();
+      // 文件存储为空 → 可能还停留在旧的 AsyncStorage 格式，迁移一次
+      if (entries.length === 0) {
+        await migrateLegacySessions();
+        entries = await loadSessionIndex();
       }
-      if (!rawIdx) return;
-      const index = JSON.parse(rawIdx);
-      const ids = Object.keys(index);
-      const sessions = [];
-      for (const id of ids) {
+
+      const sessions: WorldSession[] = [];
+      for (const e of entries) {
         try {
-          const raw = await AsyncStorage.getItem('@koyoi_session_' + id);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (parsed?.id && parsed?.world) sessions.push(normalizeSession(parsed));
-          }
-        } catch {}
+          const parsed = await loadStoredSession(e.id);
+          if (parsed?.id && parsed?.world) sessions.push(normalizeSession(parsed));
+        } catch { /* 单个世界损坏，跳过 */ }
       }
       // 按最后活跃时间排序
       sessions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setSessions(sessions);
-    } catch {}
+    } catch (e) {
+      console.warn('[Home] loadSessions failed:', (e as Error).message);
+    }
   };
   const deleteSession = async (id: string) => {
     const updated = sessions.filter(s => s.id !== id); setSessions(updated);
-    // 删除独立 key
-    await AsyncStorage.removeItem('@koyoi_session_' + id);
-    // 更新索引
-    const rawIdx = await AsyncStorage.getItem('@koyoi_world_index');
-    if (rawIdx) {
-      const index = JSON.parse(rawIdx);
-      delete index[id];
-      await AsyncStorage.setItem('@koyoi_world_index', JSON.stringify(index));
-    }
+    await deleteStoredSession(id);
+    await AsyncStorage.removeItem('@koyoi_session_' + id).catch(() => {});
   };
 
   const handleRepair = async (session: WorldSession) => {
@@ -154,7 +186,8 @@ export default function HomeScreen({ isDark, onEnterWorld, onNewWorld, onNewFanf
           const merged = mergeRepair(session, repaired);
           const updated = sessions.map(s => s.id === merged.id ? merged : s);
           setSessions(updated);
-          await AsyncStorage.setItem(WORLDS_KEY, JSON.stringify(updated));
+          // 写回文件存储（WORLDS_KEY 已废弃，写那里没人读）
+          await saveFullSession(merged, merged.messages || []);
           showAlert('修复完成', '世界数据已修复，可以进入了', [{ text: '好的' }]);
         } catch (e: any) { showAlert('修复失败', e.message || '未知错误', [{ text: '好的' }]); }
       } },

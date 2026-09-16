@@ -6,7 +6,6 @@ import {
   View, Text, TextInput, TouchableOpacity, FlatList,
   StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, LayoutAnimation, Keyboard, Dimensions,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useConfigStore } from '../store/configStore';
 import Toast from '../components/Toast';
 import FadeIn from '../components/FadeIn';
@@ -24,6 +23,7 @@ import { generateBackgroundInteraction, applyBackgroundInteraction } from '../se
 import { WORLD_RULES, NARRATOR_BASE, NARRATOR_FANFIC_APPEND, VOCAB_LOCK, POST_HISTORY_BASE } from '../prompts/worldRules';
 import { processInput, maybeGenerateSummary, buildContext, runCharacterSimulation, assemblePrompt, callAI, postProcessResponse, runPostSendHooks } from '../services/sendPipeline';
 import { routeContent } from '../services/sendPipeline/stage4_5_router';
+import { appendMessages, saveMeta, saveFullSession, loadSession as loadStoredSession } from '../services/sessionStorage';
 import { recordFeedback as rf } from '../services/feedbackStore';
 import { SAFE_TOP } from '../theme/safeArea';
 import { useSafeBottom } from '../theme/useSafeBottom';
@@ -123,6 +123,20 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
   // 键盘状态：自己监听事件拿精确键盘高度（不依赖 KAV 内部计算——不同输入法事件时序会导致残留）
   const [kbHeight, setKbHeight] = useState(0);
   const [inputBarH, setInputBarH] = useState(56);  // 输入区高度（onLayout 实测，默认估算）
+
+  // 恢复已落盘的消息数，使本次进入后的首次保存走增量而非全量重写
+  useEffect(() => {
+    let cancelled = false;
+    loadStoredSession(initialSession.id)
+      .then(stored => {
+        if (cancelled) return;
+        savedMsgCount.current = stored
+          ? stored.messages.length
+          : initialSession.messages.length;   // 文件缺失时按"已全部落盘"处理，首次保存走全量
+      })
+      .catch(() => { if (!cancelled) savedMsgCount.current = null; });
+    return () => { cancelled = true; };
+  }, [initialSession.id]);
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', (e: any) => {
       const h = e?.endCoordinates?.height || 0;
@@ -177,51 +191,48 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
     ]);
   };
 
-  const SESSION_KEY = '@koyoi_session_' + session.id;
-  const INDEX_KEY = '@koyoi_world_index';
   const messagesRef = useRef(messages);
   const sessionRef = useRef(session);
   messagesRef.current = messages;
   sessionRef.current = session;
 
-  // 索引写入锁：防止并发写覆盖
-  const indexLock = useRef(false);
+  // 已落盘的消息条数：用于判断该全量重写还是增量追加
+  const savedMsgCount = useRef<number | null>(null);
 
+  /**
+   * 保存会话。
+   *
+   * 改为 JSONL 增量写：只有新增消息走 appendMessages（读取+追加+原子替换），
+   * 不再每轮把整个会话（含全部历史消息）重新 stringify 后整块覆盖写。
+   * 旧实现是 O(n²)，200 轮后既慢又可能撞上 AsyncStorage 单值上限。
+   *
+   * 当非消息字段（moods/scene/npcs/currentChapter 等）变化时走 saveMeta，
+   * 它不触碰 chat.jsonl，因此开销与消息量无关。
+   */
   const saveSession = useCallback(async (msgs?: ChatMessage[]) => {
     const latestMessages = msgs ?? messagesRef.current;
     const latestSession = sessionRef.current;
-    try {
-      await AsyncStorage.setItem(SESSION_KEY, JSON.stringify({
-        ...latestSession,
-        messages: latestMessages,
-        recentWorldEvents: latestSession.recentWorldEvents || [],
-        worldLog: latestSession.worldLog || [],
-        memories: latestSession.memories || [],
-        currentChapter: latestSession.currentChapter || 0,
-      }));
 
-      // 索引写入加锁
-      while (indexLock.current) { await new Promise(r => setTimeout(r, 50)); }
-      indexLock.current = true;
-      try {
-        const rawIdx = await AsyncStorage.getItem(INDEX_KEY);
-        const index = rawIdx ? JSON.parse(rawIdx) : {};
-        index[latestSession.id] = {
-          id: latestSession.id,
-          name: latestSession.world?.name || '未知',
-          type: latestSession.world?.type || 'custom',
-          charCount: latestSession.selectedCharacters?.length || 0,
-          msgCount: latestMessages.length,
-          lastActivity: new Date().toISOString(),
-          hasNovelId: !!latestSession.worldNovelId,
-          currentChapter: latestSession.currentChapter || 0,
-        };
-        await AsyncStorage.setItem(INDEX_KEY, JSON.stringify(index));
-      } finally {
-        indexLock.current = false;
+    // 每次保存都刷新 sessionRef，避免 stage8 就地改写与 React state 分叉
+    // （stage8_hooks 直接改 session 对象字段，这里统一塞回 messages）
+    sessionRef.current = { ...latestSession, messages: latestMessages };
+
+    try {
+      const prev = savedMsgCount.current;
+      const canAppend = prev !== null && latestMessages.length >= prev;
+
+      if (canAppend && latestMessages.length > prev) {
+        // 增量：只写本轮新增的尾部消息
+        await appendMessages(latestSession.id, latestMessages.slice(prev));
+        await saveMeta({ ...latestSession, messages: latestMessages });
+      } else {
+        await saveFullSession({ ...latestSession, messages: latestMessages }, latestMessages);
       }
-    } catch { indexLock.current = false; }
-  }, [SESSION_KEY, INDEX_KEY]);
+      savedMsgCount.current = latestMessages.length;
+    } catch (e) {
+      console.warn('[WorldChat] saveSession failed:', (e as Error).message);
+    }
+  }, []);
 
   const send = useCallback(async () => {
     if (segments.length === 0 || isGenerating) return;
