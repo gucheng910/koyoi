@@ -85,8 +85,8 @@
 
 | 设备类型 | 下载文件 | 大小 |
 |---------|------|------|
-| 主流 Android 手机（2020+） | `koyoi-v2.17.0-arm64-v8a.apk` | ~67 MB |
-| Android 模拟器 | `koyoi-v2.17.0-x86_64.apk` | ~66 MB |
+| 主流 Android 手机（2020+） | `koyoi-v2.20.0-arm64-v8a.apk` | ~28 MB |
+| Android 模拟器 | `koyoi-v2.20.0-x86_64.apk` | ~28 MB |
 
 > 💡 **怎么判断？** 骁龙/天玑/麒麟/Exynos 处理器 → 选 arm64-v8a。电脑上跑模拟器 → 选 x86_64。
 
