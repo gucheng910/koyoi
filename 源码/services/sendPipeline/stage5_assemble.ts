@@ -2,8 +2,10 @@
 //  发送管线 — 阶段 5: 提示词组装
 // ============================================================
 
-import React from 'react';
-import { NARRATOR_BASE, NARRATOR_FANFIC_APPEND, VOCAB_LOCK, POST_HISTORY_BASE, WORLD_RULES, ANTI_AI_PATTERN } from '../../prompts/worldRules';
+import {
+  NARRATOR_BASE, NARRATOR_FANFIC_APPEND, VOCAB_LOCK, POST_HISTORY_BASE, WORLD_RULES, ANTI_AI_PATTERN,
+} from '../../prompts/worldRules';
+import { getWorldState } from '../../store/worldSessionStore';
 import { contextToPrompt } from '../dialogueContext';
 import { selectMemoriesForPrompt } from '../memoryManager';
 import { routerToPrompt } from './stage4_5_router';
@@ -190,11 +192,15 @@ export async function assemblePrompt(
   chapterCtx: any,
   isFanfic: boolean,
   cfg: ApiConfig,
-  summaryRef: React.MutableRefObject<string>,
-  attitudes: React.MutableRefObject<Record<string, any>>,
-  routerDecision?: RouterDecision | null,
-  activeChars?: string[]
+  routerDecision?: RouterDecision | null
 ): Promise<PromptResult> {
+  // 摘要 / 好感度 / 在场角色改为从 store 读取（原先由组件通过 ref 传入，
+  // 那些 ref 是为了绕开「useState 无法被服务层读」而存在的手工同步）
+  const store = getWorldState();
+  const summaryRef = { current: store.summary };
+  const attitudes = { current: store.attitudes };
+  const activeChars = store.activeChars;
+
   console.log('[PIPELINE] stage5 assemble start promptMsgs=' + msgsWithUser.length);
   const fanficAppend = isFanfic ? NARRATOR_FANFIC_APPEND : '';
   const chapterPrompt = (isFanfic && chapterCtx) ? contextToPrompt(chapterCtx) : '';

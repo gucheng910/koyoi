@@ -1,0 +1,43 @@
+重构: 会话状态迁入 Zustand store（阶段三）
+
+WorldChatScreen 原先把会话状态放在 useState，而服务层需要读最新值，
+于是组件里手工维护了 6 个 useRef 做同步：
+  turnCount / activeChars / lastSimResults / attitudes / summaryRef
+每个 ref 都是一次「React 状态没法被服务层读」的妥协。
+
+更实质的问题是 stage8_hooks 直接就地改写它收到的 session 对象
+（session.worldClock = ... / session.characterMoods = ...），而那个对象
+来自 sessionRef.current——一个只在 render 期间才与 state 对齐的引用。
+setSession 造出新对象后、下一次 render 重新赋值前，两者分叉，这个窗口内
+saveSession 读到的是被就地改过的旧对象（缺 setSession 里其余字段的更新）。
+这正是 git log 里反复出现「世界加载异常 / 保存时机」类补丁的根因。
+
+新增 源码/store/worldSessionStore.ts：
+- 唯一真源，服务层用 getWorldState() 读当前值，不依赖 render 时机
+- patchSession 是替代 setSession(prev => ...) 的唯一入口，走不可变更新
+- setChapter 内含单调性保护：乱序回来的后台回调不会把章节拉回去
+- openWorld/closeWorld 管理生命周期，切世界不泄漏状态
+
+改动的调用方：
+- WorldChatScreen：订阅 store，删除 5 个状态镜像 ref（8 → 3，
+  剩余 3 个是 FlatList / 滚动位置 / 落盘断点，属真实 UI 副作用）；
+  清掉 16 个自 stage8 吸收逻辑后遗留的死 import
+- stage2_summary / stage4_simulation / stage5_assemble / stage7_post /
+  stage8_hooks：改为从 store 读取，签名里去掉全部 MutableRefObject 参数；
+  stage8 不再有任何就地赋值（grep "session.x =" 仅剩 worldClock.ts 一处
+  未被调用的独立工具函数）
+- stage4 的 chapterCtx 仍显式传入：它是本轮的输入（依赖玩家刚发的内容），
+  不是可持久化状态
+- App.tsx：清理死常量与未使用 import
+
+新增测试 20 个（store/__tests__/）：
+- worldSessionStore.test.ts（13）：生命周期、patchSession 合并语义、
+  章节单调性、activeChars 去重、moods 合并、服务层读取
+- sessionConsistency.test.ts（7）：专门锁住「就地改写 vs 造新对象」分叉、
+  连续更新的互不覆盖、乱序章节回调、切世界不泄漏
+
+验证：tsc 0 错误；jest 9 套件 70 用例通过；expo export 成功
+（664 modules, exit 0）。
+
+仍未验证：真机行为。store 消除了静态可证的分叉窗口，但实际手感
+（长对话、切世界、后台回调时序）需要实机确认。

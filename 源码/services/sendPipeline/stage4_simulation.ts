@@ -8,19 +8,33 @@ import { profileToPrompt } from '../characterBehaviorSynthesizer';
 import type { WorldSession, Character } from '../../types';
 import type { CharacterAction } from '../characterSimulator';
 import type { ApiConfig } from '../../types';
+import { getWorldState, useWorldSessionStore } from '../../store/worldSessionStore';
+import { useConfigStore } from '../../store/configStore';
 
-export async function runCharacterSimulation(
-  session: WorldSession,
-  cfg: ApiConfig,
-  chapterCtx: any,
-  isFanfic: boolean,
-  turnCount: number,
-  activeChars: React.MutableRefObject<string[]>,
-  lastSimResults: React.MutableRefObject<Record<string, { intent: string; mood: string }>>,
-  attitudes: React.MutableRefObject<Record<string, any>>
-): Promise<CharacterAction[]> {
-  console.log('[PIPELINE] stage4 simulation start turn=' + turnCount + ' active=' + activeChars.current.length);
+/**
+ * 阶段 4: 角色推演
+ *
+ * 会话状态（session / turnCount / activeChars / attitudes / lastSimResults）
+ * 全部从 store 读取，不再由组件通过 ref 传入——服务层因此不依赖 render 时机。
+ *
+ * @param chapterCtx 阶段 3 产出的章节上下文。它是本轮的「输入」而非状态，
+ *                   依赖玩家刚发的内容，因此显式传入而非从 store 取。
+ */
+export async function runCharacterSimulation(chapterCtx?: any): Promise<CharacterAction[]> {
+  const store = getWorldState();
+  const session = store.session;
+  if (!session) return [];
+
+  const cfg = useConfigStore.getState().getActiveConfig();
+  if (!cfg) return [];
+
+  const turnCount = store.turnCount;
+  const activeChars = store.activeChars;
+
+  console.log('[PIPELINE] stage4 simulation start turn=' + turnCount + ' active=' + activeChars.length);
+
   // 同人模式：玩家角色不参与推演（玩家的行动由玩家控制，不被 AI 操控）
+  const isFanfic = !!session.worldNovelId;
   const playerNames = new Set<string>();
   if (isFanfic && session.selectedCharacters.length > 0) {
     playerNames.add(session.selectedCharacters[0].name);
@@ -28,7 +42,7 @@ export async function runCharacterSimulation(
   const chars = [
     ...session.selectedCharacters
       .filter(c => !playerNames.has(c.name))
-      .filter(c => activeChars.current.includes(c.name))
+      .filter(c => activeChars.includes(c.name))
       .map(c => ({
         name: c.name, personality: c.personality.traits.join('/'), deepPersonality: '',
         role: c.relationship.status, status: c.currentContext.location, goal: '',
@@ -37,7 +51,7 @@ export async function runCharacterSimulation(
     ...(session.npcs || []).map(n => ({
       name: n.name, personality: n.personality, deepPersonality: '',
       role: n.role, status: n.currentStatus, goal: n.goal || '', relationship: '路人',
-      interactionState: activeChars.current.includes(n.name) ? 'active' as const : 'inactive' as const,
+      interactionState: activeChars.includes(n.name) ? 'active' as const : 'inactive' as const,
     })),
     ...(isFanfic && turnCount % 3 === 0
       ? (session.world?.characters || [])
@@ -105,7 +119,7 @@ export async function runCharacterSimulation(
         const who = m.role === 'user' ? '[玩家]' : '[其他人]';
         return who + '：' + String(m.content || '').slice(0, 80);
       }).join('\n');
-      const activeNames = new Set(activeChars.current);
+      const activeNames = new Set(activeChars);
       for (const c of chars) {
         if (c.interactionState === 'active' && activeNames.has(c.name)) {
           dialogueByChar[c.name] = dialogueText;
@@ -116,35 +130,44 @@ export async function runCharacterSimulation(
     const result = await simulateCharacters(
       cfg, chars, session.currentScene,
       (session.recentWorldEvents || []).slice(-2).join('；'),
-      activeChars.current.join('、'), lastSimResults.current, simKbContext, behaviorProfiles, dialogueByChar
+      activeChars.join('、'), store.lastSimResults, simKbContext, behaviorProfiles, dialogueByChar
     );
     const actions = result.actions;
 
+    // 好感度累积：基于 store 里的当前值计算，再整体写回（不再就地改 ref 对象）
+    const nextAttitudes = { ...store.attitudes };
     const record: Record<string, { intent: string; mood: string }> = {};
     for (const a of actions) {
       record[a.name] = { intent: a.intent, mood: a.mood };
       if (a.affectionDelta && Math.abs(a.affectionDelta) > 0.001) {
-        if (!attitudes.current[a.name]) attitudes.current[a.name] = { trust: 50, affection: 0, fear: 20, lastUpdate: '' };
+        const prev = nextAttitudes[a.name] || { trust: 50, affection: 0, fear: 20, lastUpdate: '' };
         let delta = a.affectionDelta;
-        const aff = attitudes.current[a.name].affection || 0;
+        const aff = prev.affection || 0;
         if (aff > 80) delta *= 0.25;
         else if (aff > 60) delta *= 0.5;
         else if (aff < -50) delta *= 1.5;
-        attitudes.current[a.name].affection = Math.max(-100, Math.min(100, aff + delta));
+        nextAttitudes[a.name] = {
+          ...prev,
+          affection: Math.max(-100, Math.min(100, aff + delta)),
+          lastUpdate: new Date().toISOString(),
+        };
       }
     }
-    lastSimResults.current = record;
+    useWorldSessionStore.getState().setLastSimResults(record);
+    useWorldSessionStore.getState().setAttitudes(nextAttitudes);
 
     for (const ch of result.interactionChanges) {
-      if (ch.action === 'pull_in' && ch.character_name && !activeChars.current.includes(ch.character_name)) {
-        activeChars.current.push(ch.character_name);
-      } else if (ch.action === 'push_out' && ch.character_name) {
-        activeChars.current = activeChars.current.filter(n => n !== ch.character_name);
+      if (!ch.character_name) continue;
+      if (ch.action === 'pull_in') {
+        useWorldSessionStore.getState().addActiveChar(ch.character_name);
+      } else if (ch.action === 'push_out') {
+        useWorldSessionStore.getState().removeActiveChar(ch.character_name);
       }
     }
 
     return actions;
-  } catch {
+  } catch (e) {
+    console.warn('[sendPipeline] stage4 simulation failed: ' + (e instanceof Error ? e.message : String(e)));
     return [];
   }
 }

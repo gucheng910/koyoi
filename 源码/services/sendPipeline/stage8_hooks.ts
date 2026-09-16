@@ -17,48 +17,53 @@ import { generateWorldPulse } from '../worldClock';
 import { extractNotableEvents, propagateRumors } from '../rumorPropagation';
 import type { WorldSession, ChatMessage, CharacterKnowledge, MemoryItem } from '../../types';
 import type { CharacterAction } from '../characterSimulator';
+import { getWorldState, useWorldSessionStore } from '../../store/worldSessionStore';
 
 export interface PostSendHooksParams {
-  session: WorldSession;
   updated: ChatMessage[];
-  turnCount: React.MutableRefObject<number>;
   saveSession: (msgs?: ChatMessage[]) => Promise<void>;
-  setSession: React.Dispatch<React.SetStateAction<WorldSession>>;
-  activeChars: React.MutableRefObject<string[]>;
-  lastSimResults: React.MutableRefObject<Record<string, { intent: string; mood: string }>>;
   charActions?: CharacterAction[];
   userMsg?: ChatMessage;
 }
 
 export async function runPostSendHooks(params: PostSendHooksParams) {
-  const { updated, turnCount, saveSession, setSession, session, charActions, userMsg } = params;
-  console.log('[PIPELINE] stage8 hooks start turn=' + turnCount.current);
+  const { updated, saveSession, charActions, userMsg } = params;
+
+  // 从 store 读当前值，而不是从组件传进来的 ref——
+  // 服务层不再依赖组件的 render 时机，也不再有「state 与 ref 分叉」的窗口
+  const store = getWorldState();
+  const session = store.session;
+  if (!session) {
+    console.warn('[sendPipeline] stage8 skipped: no active session in store');
+    return;
+  }
+
+  // 回合自增：store 是唯一真源
+  const turn = useWorldSessionStore.getState().bumpTurn();
+  console.log('[PIPELINE] stage8 hooks start turn=' + turn);
+
   // hooks 整体保护：任一子逻辑抛错不得中断后续（保存已在 send 主流程完成，hooks 失败不影响数据）
   try {
 
-  turnCount.current++;
-
-  // 直接更新 session 对象（同步到 sessionRef），再走 setSession 通知 UI
-  session.worldClock = (session.worldClock || 0) + 1;
-  setSession(prev => ({ ...prev, worldClock: session.worldClock }));
+  useWorldSessionStore.getState().patchSession({ worldClock: (session.worldClock || 0) + 1 });
 
   // 情绪惯性：将角色推演结果同步到情绪系统
   if (charActions && charActions.length > 0) {
-    const updatedMoodsFromActions = updateMoods(charActions, session.characterMoods || {}, turnCount.current);
-    session.characterMoods = updatedMoodsFromActions;
-    setSession(prev => ({ ...prev, characterMoods: updatedMoodsFromActions }));
-    console.log('[MOOD] updated from ' + Object.keys(session.characterMoods || {}).length + ' chars');
+    const updatedMoodsFromActions = updateMoods(charActions, session.characterMoods || {}, turn);
+    useWorldSessionStore.getState().setMoods(updatedMoodsFromActions);
+    console.log('[MOOD] updated from ' + Object.keys(updatedMoodsFromActions).length + ' chars');
   }
 
   // 情绪衰减（即使没有推演结果也执行）
+  // 注意：读 store 最新值而非上面那份 session 快照——moods 可能刚被更新
   const updatedMoods = decayMoods(
-    session.characterMoods || {},
-    turnCount.current
+    getWorldState().session?.characterMoods || {},
+    turn
   );
 
   const lastUserMsg = userMsg?.content || '';
   const lastAIRes = updated.length > 0 ? updated[updated.length - 1]?.content || '' : '';
-  const newEvents = extractNotableEvents(session, lastUserMsg, lastAIRes, turnCount.current);
+  const newEvents = extractNotableEvents(session, lastUserMsg, lastAIRes, turn);
   const allEvents = [...(session.notableEvents || []), ...newEvents].slice(-20);
 
   let updatedKnowledge: Record<string, CharacterKnowledge> | undefined;
@@ -67,7 +72,7 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
       const kb = session.worldNovelId ? await loadKnowledgeBase(session.worldNovelId) : null;
       if (kb) {
         const graph = new KnowledgeGraph(kb, session.currentChapter || 0);
-        const tempSession: WorldSession = { ...session, notableEvents: allEvents, worldClock: turnCount.current };
+        const tempSession: WorldSession = { ...session, notableEvents: allEvents, worldClock: turn };
         updatedKnowledge = propagateRumors(tempSession, graph);
       }
     } catch (e) {
@@ -75,28 +80,23 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
     }
   }
 
-  // 直接更新 session 对象，确保 saveSession 读到最新值
-  session.characterMoods = updatedMoods;
-  session.notableEvents = allEvents;
-  if (updatedKnowledge) session.characterKnowledge = updatedKnowledge;
-  setSession(prev => ({
-    ...prev,
+  // 一次性提交本轮的所有派生状态（不再就地改写 session 对象）
+  useWorldSessionStore.getState().patchSession({
     characterMoods: updatedMoods,
     notableEvents: allEvents,
-    characterKnowledge: updatedKnowledge || prev.characterKnowledge,
-  }));
+    ...(updatedKnowledge ? { characterKnowledge: updatedKnowledge } : {}),
+  });
 
-  if (turnCount.current % 5 === 0) {
-    // 此时 session 已包含最新的 moods/events/knowledge，可以安全保存
-    const sessionForPulse = { ...session, worldClock: turnCount.current };
-    generateWorldPulse(sessionForPulse as any, turnCount.current).then(pulse => {
-      if (pulse) {
-        setSession(prev => ({
-          ...prev,
-          recentWorldEvents: [...prev.recentWorldEvents.slice(-10), pulse.summary],
-          worldLog: [...prev.worldLog, ...pulse.events],
-        }));
-      }
+  if (turn % 5 === 0) {
+    generateWorldPulse({ ...session, worldClock: turn } as any, turn).then(pulse => {
+      if (!pulse) return;
+      // 用 store 的最新值计算，避免覆盖这期间的其他更新
+      const cur = getWorldState().session;
+      if (!cur) return;
+      useWorldSessionStore.getState().patchSession({
+        recentWorldEvents: [...(cur.recentWorldEvents || []).slice(-10), pulse.summary],
+        worldLog: [...(cur.worldLog || []), ...pulse.events],
+      });
     }).catch(() => { console.warn('[sendPipeline] world pulse failed'); });
   }
 
@@ -105,38 +105,41 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
 
   // 叙事导演已并入内容路由器（每轮输出 tone/intent/sceneHint），此处不再独立调用
 
-  if (turnCount.current % 3 === 0 && session.worldNovelId) {
+  if (turn % 3 === 0 && session.worldNovelId) {
     const cfg = useConfigStore.getState().getActiveConfig();
     if (cfg) {
       const recentTexts = updated.slice(-6).filter((m: any) => !m.isStreaming).map((m: any) => m.content).join('\n');
       estimateChapterPosition(cfg, session.worldNovelId, session.currentChapter || 0, [recentTexts])
         .then((pos: any) => {
-          const newCh = shouldAdvanceChapter(session.currentChapter || 0, pos);
-          if (newCh !== null) setSession(prev => ({ ...prev, currentChapter: newCh }));
+          // setChapter 内含单调性保护：乱序回来的旧结果不会把章节拉回去
+          const newCh = shouldAdvanceChapter(getWorldState().session?.currentChapter || 0, pos);
+          if (newCh !== null) useWorldSessionStore.getState().setChapter(newCh);
         }).catch(() => { console.warn('[sendPipeline] chapter tracking failed'); });
     }
   }
 
-  if (turnCount.current % 10 === 0) {
+  if (turn % 10 === 0) {
     const mcfg = useConfigStore.getState().getActiveConfig();
     if (mcfg) {
-      extractMemories(mcfg.apiKey, mcfg.baseUrl, mcfg.model, updated, params.lastSimResults.current)
+      const simResults = getWorldState().lastSimResults;
+      extractMemories(mcfg.apiKey, mcfg.baseUrl, mcfg.model, updated, simResults)
         .then(async (mems: MemoryItem[]) => {
           if (!mems.length) return;
-          setSession(prev => {
-            const merged = [...(prev.memories || []), ...mems];
-            if (merged.length > 25) {
-              reSummarizeMemories(mcfg.apiKey, mcfg.baseUrl, mcfg.model, merged).then(compressed => {
-                if (compressed) setSession(p => ({ ...p, memories: compressed.slice(-30) }));
-              }).catch(() => { console.warn('[sendPipeline] memory re-summarize failed'); });
-            }
-            return { ...prev, memories: merged.slice(-30) };
-          });
+          const cur = getWorldState().session;
+          if (!cur) return;
+          const merged = [...(cur.memories || []), ...mems];
+          useWorldSessionStore.getState().patchSession({ memories: merged.slice(-30) });
+
+          if (merged.length > 25) {
+            reSummarizeMemories(mcfg.apiKey, mcfg.baseUrl, mcfg.model, merged).then(compressed => {
+              if (compressed) useWorldSessionStore.getState().patchSession({ memories: compressed.slice(-30) });
+            }).catch(() => { console.warn('[sendPipeline] memory re-summarize failed'); });
+          }
         });
     }
   }
 
-  if (turnCount.current % 5 === 0 && (session.selectedCharacters.length + (session.npcs || []).length) >= 2) {
+  if (turn % 5 === 0 && (session.selectedCharacters.length + (session.npcs || []).length) >= 2) {
     const bcfg = useConfigStore.getState().getActiveConfig();
     if (bcfg) {
       // 合并选中角色 + 世界 NPC + 世界角色库中的未出场角色
@@ -153,7 +156,10 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
       const activeList = allChars.slice(0, 6);
       generateBackgroundInteraction(bcfg, activeList, session.currentScene || '未知场景')
         .then((interaction: any) => {
-          if (interaction) setSession(prev => applyBackgroundInteraction(prev, interaction));
+          if (!interaction) return;
+          const cur = getWorldState().session;
+          if (!cur) return;
+          useWorldSessionStore.getState().patchSession(applyBackgroundInteraction(cur, interaction));
         }).catch(() => { console.warn('[sendPipeline] background interaction failed'); });
     }
   }

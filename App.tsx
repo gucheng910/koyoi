@@ -2,9 +2,9 @@
 //  Koyoi v2 - 世界中心架构
 //  首页=世界列表, 角色卡在"角色"tab, 亲密度世界内隔离
 // ============================================================
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, AppState, BackHandler, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, AppState, BackHandler } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useConfigStore } from './源码/store/configStore';
 import { useCharacterStore } from './源码/store/characterStore';
@@ -32,7 +32,6 @@ import DisclaimerScreen from './源码/components/DisclaimerScreen';
 import type { Character, WorldSession } from './源码/types';
 
 type Tab = 'home' | 'characters' | 'create' | 'settings';
-const THEME_KEY = '@koyoi_theme';
 
 export default function App() {
   return (
@@ -48,7 +47,7 @@ export default function App() {
 
 function AppContent() {
   const bottomInset = useSafeBottom();
-  const { mode, t, setMode } = useTheme();
+  const { mode, setMode } = useTheme();
   const isDark = mode === 'dark';
   const [disclaimerAgreed, setDisclaimerAgreed] = useState(true);
   const [showSplash, setShowSplash] = useState(true);

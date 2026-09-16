@@ -4,26 +4,18 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, FlatList,
-  StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, LayoutAnimation, Keyboard, Dimensions,
+  StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, LayoutAnimation, Keyboard,
 } from 'react-native';
 import { useConfigStore } from '../store/configStore';
 import Toast from '../components/Toast';
 import FadeIn from '../components/FadeIn';
 import { showAlert } from '../components/AnimatedAlert';
-import { chatCompletion, chatCompletionSync, polishText } from '../api/deepseek';
-import { simulateCharacters } from '../services/characterSimulator';
-import type { WorldSession, ChatMessage, Character } from '../types';
+import type { WorldSession, ChatMessage } from '../types';
 import type { CharacterAction } from '../services/characterSimulator';
-import { breatheWorld as breatheWorldFn } from '../services/breatheWorld';
-import { buildDialogueContext, contextToPrompt } from '../services/dialogueContext';
-import { estimateChapterPosition, shouldAdvanceChapter } from '../services/chapterTracker';
-import { getWorldInfo as getWorldInfoFn, extractMemories as extractMemoriesFn } from '../services/worldInfoService';
-import { enhanceWithScenario } from '../services/scenarioInjector';
-import { generateBackgroundInteraction, applyBackgroundInteraction } from '../services/backgroundInteraction';
-import { WORLD_RULES, NARRATOR_BASE, NARRATOR_FANFIC_APPEND, VOCAB_LOCK, POST_HISTORY_BASE } from '../prompts/worldRules';
 import { processInput, maybeGenerateSummary, buildContext, runCharacterSimulation, assemblePrompt, callAI, postProcessResponse, runPostSendHooks } from '../services/sendPipeline';
 import { routeContent } from '../services/sendPipeline/stage4_5_router';
 import { appendMessages, saveMeta, saveFullSession, loadSession as loadStoredSession } from '../services/sessionStorage';
+import { useWorldSessionStore, getWorldState } from '../store/worldSessionStore';
 import { recordFeedback as rf } from '../services/feedbackStore';
 import { SAFE_TOP } from '../theme/safeArea';
 import { useSafeBottom } from '../theme/useSafeBottom';
@@ -100,8 +92,15 @@ function normalizeSession(s: any) {
 export default function WorldChatScreen({ session: initialSession, onBack, isDark }: Props) {
   const st = T(isDark);
   const bottomInset = useSafeBottom();
-  const [session, setSession] = useState(initialSession);
-  const [messages, setMessages] = useState<ChatMessage[]>(initialSession.messages);
+
+  // ---- 会话状态来自 store（原先是 useState + 6 个手工同步的 useRef）----
+  const session = useWorldSessionStore(s => s.session) ?? initialSession;
+  const messages = useWorldSessionStore(s => s.messages);
+  const turnCount = useWorldSessionStore(s => s.turnCount);
+  const activeChars = useWorldSessionStore(s => s.activeChars);
+  const attitudes = useWorldSessionStore(s => s.attitudes);
+  const summary = useWorldSessionStore(s => s.summary);
+
   const [inputText, setInputText] = useState('');
   const [segments, setSegments] = useState<{text: string; tag: string}[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -112,19 +111,21 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
   const [showOpening, setShowOpening] = useState(true);
   const [showCast, setShowCast] = useState(false);
   const [showLog, setShowLog] = useState(false);
-  const turnCount = useRef(Math.floor(initialSession.messages.length / 2));
   const flatListRef = useRef<FlatList>(null);
-  const activeChars = useRef<string[]>(initialSession.selectedCharacters.map(c => c.name));
-  const lastSimResults = useRef<Record<string,{intent:string;mood:string}>>({});
   const isNearBottom = useRef(true);
-  const attitudes = useRef<Record<string, any>>((session as any).characterAttitudes || {});
-  const summaryRef = useRef('');
+
+  // 进入/切换世界时载入 store；离开时清空，避免下一个世界读到脏状态
+  useEffect(() => {
+    useWorldSessionStore.getState().openWorld(initialSession);
+    return () => { useWorldSessionStore.getState().closeWorld(); };
+  }, [initialSession.id]);
 
   // 键盘状态：自己监听事件拿精确键盘高度（不依赖 KAV 内部计算——不同输入法事件时序会导致残留）
   const [kbHeight, setKbHeight] = useState(0);
   const [inputBarH, setInputBarH] = useState(56);  // 输入区高度（onLayout 实测，默认估算）
 
   // 恢复已落盘的消息数，使本次进入后的首次保存走增量而非全量重写
+  const savedMsgCount = useRef<number | null>(null);
   useEffect(() => {
     let cancelled = false;
     loadStoredSession(initialSession.id)
@@ -166,7 +167,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
   const recordFeedback = (rating: 1 | 0, msg: ChatMessage, userMsg: ChatMessage | undefined, s: WorldSession) => {
     rf({
       worldId: s.id, worldName: s.world?.name || '',
-      turnNumber: turnCount.current,
+      turnNumber: turnCount,
       userMessage: userMsg?.content?.slice(0, 200) || '',
       aiResponsePreview: msg.content?.slice(0, 300) || '',
       rating, scene: s.currentScene || '',
@@ -185,19 +186,11 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
       { text: '取消', style: 'cancel' },
       { text: '重新生成', onPress: () => {
         const trimmed = messages.slice(0, cutIdx);
-        setMessages(trimmed);
+        useWorldSessionStore.getState().setMessages(trimmed);
         setToast({msg: '已移除上一条回复，修改消息后重新发送', type: 'success'});
       } },
     ]);
   };
-
-  const messagesRef = useRef(messages);
-  const sessionRef = useRef(session);
-  messagesRef.current = messages;
-  sessionRef.current = session;
-
-  // 已落盘的消息条数：用于判断该全量重写还是增量追加
-  const savedMsgCount = useRef<number | null>(null);
 
   /**
    * 保存会话。
@@ -210,12 +203,11 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
    * 它不触碰 chat.jsonl，因此开销与消息量无关。
    */
   const saveSession = useCallback(async (msgs?: ChatMessage[]) => {
-    const latestMessages = msgs ?? messagesRef.current;
-    const latestSession = sessionRef.current;
-
-    // 每次保存都刷新 sessionRef，避免 stage8 就地改写与 React state 分叉
-    // （stage8_hooks 直接改 session 对象字段，这里统一塞回 messages）
-    sessionRef.current = { ...latestSession, messages: latestMessages };
+    // 从 store 读当前值——不再依赖 sessionRef/messagesRef 的 render 时机对齐
+    const state = getWorldState();
+    const latestSession = state.session;
+    if (!latestSession) return;
+    const latestMessages = msgs ?? state.messages;
 
     try {
       const prev = savedMsgCount.current;
@@ -239,71 +231,74 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
     const cfg = useConfigStore.getState().getActiveConfig();
     if (!cfg?.apiKey) { setError('请先配置API Key'); return; }
 
+    const store = useWorldSessionStore.getState();
+    const turn = store.turnCount;
+
     // 阶段 1: 输入处理
     setError(null); setIsGenerating(true); setStreamingText('');
     const { finalText, userMsg, msgsWithUser } = processInput(segments, messages);
     setSegments([]);
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setMessages(msgsWithUser);
+    store.setMessages(msgsWithUser);
     smartScroll();
 
     try {
       // 阶段 2: 摘要生成（非阻塞）
-      maybeGenerateSummary(messages, turnCount.current, summaryRef, cfg);
+      maybeGenerateSummary(messages, turn, cfg);
 
       // 阶段 3: 上下文构建
-      const { chapterCtx, isFanfic, worldInfo } = await buildContext(session, finalText, messages, turnCount.current);
+      const { chapterCtx, isFanfic, worldInfo } = await buildContext(session, finalText, messages, turn);
 
       // 阶段 4: 角色推演 + 内容路由器（并行，互不依赖）
-      const hasRounds = turnCount.current >= 2;
+      const hasRounds = turn >= 2;
       const recentText = msgsWithUser.filter(m => m.role === 'user' || m.role === 'assistant').slice(-4).map(m => m.content).join(' ');
       const [charActions, routerDecision] = await Promise.all([
-        hasRounds
-          ? runCharacterSimulation(session, cfg, chapterCtx, isFanfic, turnCount.current, activeChars, lastSimResults, attitudes)
-          : Promise.resolve([] as CharacterAction[]),
+        hasRounds ? runCharacterSimulation(chapterCtx) : Promise.resolve([] as CharacterAction[]),
         routeContent(cfg, session, msgsWithUser, recentText),
       ]);
 
       // 阶段 5: 提示词组装
-      const { prompt } = await assemblePrompt(session, msgsWithUser, messages, charActions, chapterCtx, isFanfic, cfg, summaryRef, attitudes, routerDecision, activeChars.current);
+      const { prompt } = await assemblePrompt(session, msgsWithUser, messages, charActions, chapterCtx, isFanfic, cfg, routerDecision);
+      void worldInfo;
 
       // 阶段 6: API 调用
       const raw = await callAI(cfg, prompt, setStreamingText);
 
       if (raw) {
         // 阶段 7: 响应后处理
-        const { displayText, newNpcs, scene } = await postProcessResponse(raw, session, cfg, chapterCtx, activeChars);
+        const { displayText, newNpcs, scene } = await postProcessResponse(raw, session, cfg, chapterCtx);
         if (newNpcs) {
           for (const npc of newNpcs) {
-            setSession(prev => ({
-              ...prev,
-              npcs: [...(prev.npcs || []), npc],
-              recentWorldEvents: [...(prev.recentWorldEvents || []).slice(-19), npc.name + '进入了场景'],
-            }));
-            if (!activeChars.current.includes(npc.name)) activeChars.current.push(npc.name);
+            const cur = getWorldState().session;
+            if (!cur) break;
+            useWorldSessionStore.getState().patchSession({
+              npcs: [...(cur.npcs || []), npc],
+              recentWorldEvents: [...(cur.recentWorldEvents || []).slice(-19), npc.name + '进入了场景'],
+            });
+            useWorldSessionStore.getState().addActiveChar(npc.name);
           }
         }
         // 场景转变：AI 上报的新场景写回 session（消除场景粘滞）
         if (scene) {
-          setSession(prev => ({ ...prev, currentScene: scene }));
+          useWorldSessionStore.getState().setScene(scene);
           console.log('[SCENE] -> ' + scene);
         } else if (routerDecision?.sceneHint) {
           // flash 常不遵守 META 上报，路由器场景建议作为兜底
-          setSession(prev => ({ ...prev, currentScene: routerDecision.sceneHint as string }));
+          useWorldSessionStore.getState().setScene(routerDecision.sceneHint);
           console.log('[SCENE] router -> ' + routerDecision.sceneHint);
         }
 
         const msg: ChatMessage = { role: 'assistant', content: displayText || raw, timestamp: new Date().toISOString() };
         const updated = [...msgsWithUser, msg];
         LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
-        setMessages(updated);
+        useWorldSessionStore.getState().setMessages(updated);
         smartScroll();
 
         // 立即保存（不依赖 stage8 hooks 成功）：hooks 内部逻辑抛错会中断 saveSession，导致整轮丢失
         saveSession(updated);
 
-        // 阶段 8: 后处理钩子
-        runPostSendHooks({ session: sessionRef.current, updated, turnCount, saveSession, setSession, activeChars, lastSimResults, charActions, userMsg });
+        // 阶段 8: 后处理钩子（内部从 store 读取状态与回合数）
+        runPostSendHooks({ updated, saveSession, charActions, userMsg });
       }
     } catch (e: any) {
       const msg = e.message || String(e);
@@ -392,7 +387,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
         <TouchableOpacity onPress={() => { if (isGenerating) showAlert('退出','对话生成中，确定退出？',[{text:'取消'},{text:'退出',style:'destructive',onPress: async () => { try { await saveSession(); } catch {} finally { onBack(); } }}]); else { saveSession().then(() => onBack()).catch(() => onBack()); } }}><Text style={st.backBtn}>← 返回</Text></TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={st.topName}>{session.world?.name || '世界'}</Text>
-          <Text style={st.topStatus}>{session.selectedCharacters.length}个角色 · 第{turnCount.current + 1}轮{session.worldNovelId ? ' · 第' + ((session.currentChapter || 0) + 1) + '章' : ''}</Text>
+          <Text style={st.topStatus}>{session.selectedCharacters.length}个角色 · 第{turnCount + 1}轮{session.worldNovelId ? ' · 第' + ((session.currentChapter || 0) + 1) + '章' : ''}</Text>
         </View>
         <TouchableOpacity onPress={() => setShowLog(!showLog)} style={{ paddingHorizontal: 8 }}><Text style={{ fontSize: 11, color: '#5B9BD5' }}>{showLog ? '收起' : '📜'}</Text></TouchableOpacity>
       </View>

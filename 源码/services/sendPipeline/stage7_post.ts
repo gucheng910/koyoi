@@ -2,7 +2,6 @@
 //  发送管线 — 阶段 7: 响应后处理
 // ============================================================
 
-import React from 'react';
 import { polishText } from '../../api/deepseek';
 import type { WorldSession } from '../../types';
 import type { ApiConfig } from '../../types';
@@ -18,8 +17,7 @@ export async function postProcessResponse(
   raw: string,
   session: WorldSession,
   cfg: ApiConfig,
-  chapterCtx: any,
-  activeChars: React.MutableRefObject<string[]>
+  chapterCtx: any
 ): Promise<PostProcessResult> {
   console.log('[PIPELINE] stage7 postProcess start rawLen=' + raw.length);
   let displayText = raw;
