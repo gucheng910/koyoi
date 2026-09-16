@@ -6,6 +6,7 @@ import {
   NARRATOR_BASE, NARRATOR_FANFIC_APPEND, VOCAB_LOCK, POST_HISTORY_BASE, WORLD_RULES, ANTI_AI_PATTERN,
 } from '../../prompts/worldRules';
 import { getWorldState } from '../../store/worldSessionStore';
+import { OOC_RULES } from '../../prompts/tokens';
 import { contextToPrompt } from '../dialogueContext';
 import { selectMemoriesForPrompt } from '../memoryManager';
 import { routerToPrompt } from './stage4_5_router';
@@ -17,12 +18,9 @@ import { computeAdjustments, findSimilarSamples } from '../promptTuner';
 import type { PromptAdjustment } from '../promptTuner';
 import { moodsToPrompt } from '../emotionalInertia';
 import { knowledgeToPrompt } from '../rumorPropagation';
-import { OOC_RULES } from '../../prompts/tokens';
-import { FORMAT_RULES } from '../../prompts/tokens';
 import { directorToPrompt } from '../narrativeDirector';
-import type { WorldSession, ChatMessage, Character } from '../../types';
+import type { WorldSession, ChatMessage } from '../../types';
 import type { CharacterAction } from '../characterSimulator';
-import type { ApiConfig } from '../../types';
 
 export interface PromptResult {
   prompt: ChatMessage[];
@@ -187,11 +185,9 @@ function sceneContext(world: any, chapter: number, scene: string, activeChars: s
 export async function assemblePrompt(
   session: WorldSession,
   msgsWithUser: ChatMessage[],
-  messages: ChatMessage[],
   charActions: CharacterAction[],
   chapterCtx: any,
   isFanfic: boolean,
-  cfg: ApiConfig,
   routerDecision?: RouterDecision | null
 ): Promise<PromptResult> {
   // 摘要 / 好感度 / 在场角色改为从 store 读取（原先由组件通过 ref 传入，

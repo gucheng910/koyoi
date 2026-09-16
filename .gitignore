@@ -18,10 +18,13 @@ android/local.properties
 *.aab
 *.keystore
 
-# 但发布包和构建产物例外
-!/发布包/*.apk
-!/发布包/*.aab
-!Android构建/app/build/outputs/apk/release/*.apk
+# 不要再把 APK/AAB 提交进版本库。
+# 历史里已有 2 个 APK（约 58MB），使 .git 膨胀到 165MB。
+# 新版发布请走 GitHub Releases，仓库只保留 tag。
+/发布包/*.apk
+/发布包/*.aab
+!/发布包/.gitkeep
+/Android构建/
 
 # iOS
 ios/Pods/
@@ -54,6 +57,10 @@ Desktop/
 # Temp
 *.log
 npm-debug.log*
+
+# 一次性补丁脚本（历史遗留，83/87 指向已不存在的 D:/koyoi/src/ 路径）
+# 保留在磁盘上供查阅，但不再进版本库
+开发脚本/修复补丁/
 
 dist-android/
 android/app/src/main/assets/

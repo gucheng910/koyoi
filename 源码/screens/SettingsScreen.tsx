@@ -5,7 +5,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
-  StyleSheet, Switch, ActivityIndicator, Linking, Image, Platform,
+  StyleSheet, Switch, ActivityIndicator, Linking, Image,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { REWARD_IMAGE_URI } from '../theme/rewardImage';
@@ -15,8 +15,6 @@ import { usePersonaStore } from '../store/personaStore';
 import { useUsageStore } from '../store/usageStore';
 import Constants from 'expo-constants';
 import { getCacheMetrics } from '../api/deepseek';
-import * as SecureStore from 'expo-secure-store';
-import type { ApiConfig } from '../types';
 import { SAFE_TOP } from '../theme/safeArea';
 
 interface Props { isDark: boolean; onToggleTheme: () => void; }

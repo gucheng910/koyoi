@@ -148,7 +148,6 @@ export function buildSceneIndex(world: any, chapter: number, scene: string, acti
   return scenes
     .filter((s: any) => {
       if (!s.title) return false;
-      const chNear = Math.abs((s.chapter || 0) - cur) <= 25;
       const kwHit = (s.trigger?.keywords || []).some((k: string) => k && scene.includes(k));
       if (kwHit && (s.chapter || 0) <= cur + 25) return true;
       const upcoming = (s.chapter || 0) >= cur - 2;
@@ -191,8 +190,7 @@ const ROUTER_SYSTEM = `你是互动小说的内容路由决策器。你的工作
 export async function routeContent(
   cfg: ApiConfig,
   session: WorldSession,
-  msgsWithUser: ChatMessage[],
-  recentText: string
+  msgsWithUser: ChatMessage[]
 ): Promise<RouterDecision | null> {
   try {
     const world = (session as any).world as any;

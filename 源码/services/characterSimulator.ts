@@ -5,7 +5,7 @@
 // ============================================================
 
 import { chatCompletionSync } from '../api/deepseek';
-import type { ApiConfig, Character, WorldNpc } from '../types';
+import type { ApiConfig } from '../types';
 
 export interface CharacterAction {
   name: string;
@@ -50,20 +50,11 @@ export const INTERACTION_TOOL = {
   }
 };
 
-/** 工具函数：实际更新互动状态 */
-export function applyInteractionChange(
-  activeChars: string[],
-  call: { action: string; character_name: string; narrative: string }
-): { activeChars: string[]; narrative: string } {
-  if (call.action === 'pull_in') {
-    if (!activeChars.includes(call.character_name)) {
-      return { activeChars: [...activeChars, call.character_name], narrative: call.narrative };
-    }
-  } else if (call.action === 'push_out') {
-    return { activeChars: activeChars.filter(n => n !== call.character_name), narrative: call.narrative };
-  }
-  return { activeChars, narrative: '' };
-}
+/**
+ * 互动变更的应用已移交 store（worldSessionStore 的 addActiveChar /
+ * removeActiveChar）。原先这里有一个操作裸数组的 applyInteractionChange，
+ * 迁到 store 后不再有人调用，已删除。
+ */
 
 const SIMULATE_PROMPT = `你是{{name}}。你不是在"扮演"——你就是这个人。你的每个想法、每个微小的身体反应，都来自你的性格和历史。
 
@@ -235,19 +226,6 @@ export async function simulateCharacter(
   } catch {
     return { action: null, toolCalls: [] };
   }
-}
-
-function extractToolCalls(response: string): Array<{ action: string; character_name: string; narrative: string }> {
-  const calls: Array<{ action: string; character_name: string; narrative: string }> = [];
-  // 匹配 JSON 格式的 tool_call
-  const re = /"name":\s*"manage_interaction"[^}]*"arguments":\s*"({[^"]+})"/g;
-  // 简化：匹配 manage_interaction 调用
-  const funcRe = /manage_interaction[\s\S]*?"action":\s*"(pull_in|push_out)"[\s\S]*?"character_name":\s*"([^"]+)"[\s\S]*?"narrative":\s*"([^"]+)"/g;
-  let m;
-  while ((m = funcRe.exec(response)) !== null) {
-    calls.push({ action: m[1], character_name: m[2], narrative: m[3] });
-  }
-  return calls;
 }
 
 /**

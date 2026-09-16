@@ -240,11 +240,11 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
       const recentText = msgsWithUser.filter(m => m.role === 'user' || m.role === 'assistant').slice(-4).map(m => m.content).join(' ');
       const [charActions, routerDecision] = await Promise.all([
         hasRounds ? runCharacterSimulation(chapterCtx) : Promise.resolve([] as CharacterAction[]),
-        routeContent(cfg, session, msgsWithUser, recentText),
+        routeContent(cfg, session, msgsWithUser),
       ]);
 
       // 阶段 5: 提示词组装
-      const { prompt } = await assemblePrompt(session, msgsWithUser, messages, charActions, chapterCtx, isFanfic, cfg, routerDecision);
+      const { prompt } = await assemblePrompt(session, msgsWithUser, charActions, chapterCtx, isFanfic, routerDecision);
       void worldInfo;
 
       // 阶段 6: API 调用

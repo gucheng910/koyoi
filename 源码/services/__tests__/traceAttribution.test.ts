@@ -56,8 +56,8 @@ jest.mock('../backgroundInteraction', () => ({
 import { routeContent } from '../sendPipeline/stage4_5_router';
 import { postProcessResponse } from '../sendPipeline/stage7_post';
 import { runPostSendHooks } from '../sendPipeline/stage8_hooks';
-import { useWorldSessionStore, getWorldState } from '../../store/worldSessionStore';
-import { clearTrace, summarizeByTag, getTrace } from '../trace';
+import { useWorldSessionStore } from '../../store/worldSessionStore';
+import { clearTrace, summarizeByTag } from '../trace';
 import type { WorldSession, ChatMessage } from '../../types';
 
 const cfg: any = {
@@ -100,7 +100,7 @@ beforeEach(() => {
 describe('真实管线的归因', () => {
   it('router 调用被归到 router 而不是 other', async () => {
     const s = mk();
-    await routeContent(cfg, s, [uMsg, aMsg], 'hi');
+    await routeContent(cfg, s, [uMsg, aMsg]);
 
     const s2 = summarizeByTag();
     expect(s2.some(x => x.tag === 'router')).toBe(true);
@@ -136,7 +136,7 @@ describe('真实管线的归因', () => {
     useWorldSessionStore.getState().openWorld(s);
     useWorldSessionStore.getState().setTurnCount(4);   // bump → 5
 
-    await routeContent(cfg, s, [uMsg, aMsg], 'hi');
+    await routeContent(cfg, s, [uMsg, aMsg]);
     postProcessResponse('正文', s, cfg, { chapterText: 'x' });
     await runPostSendHooks({
       updated: [uMsg, aMsg], saveSession: async () => {}, charActions: [], userMsg: uMsg,
@@ -150,7 +150,7 @@ describe('真实管线的归因', () => {
 
   it('开销可按子系统累加（诊断面板的核心用途）', async () => {
     const s = mk();
-    await routeContent(cfg, s, [uMsg, aMsg], 'hi');
+    await routeContent(cfg, s, [uMsg, aMsg]);
     postProcessResponse('正文', s, cfg, { chapterText: 'x' });
     await new Promise(r => setImmediate(r));
 

@@ -4,7 +4,6 @@
 //  章节追踪、记忆提取、角色自主互动
 // ============================================================
 
-import React from 'react';
 import { useConfigStore } from '../../store/configStore';
 import { estimateChapterPosition, shouldAdvanceChapter } from '../chapterTracker';
 import { reSummarizeMemories } from '../memoryManager';
@@ -18,7 +17,7 @@ import { extractNotableEvents, propagateRumors } from '../rumorPropagation';
 import type { WorldSession, ChatMessage, CharacterKnowledge, MemoryItem } from '../../types';
 import type { CharacterAction } from '../characterSimulator';
 import { getWorldState, useWorldSessionStore } from '../../store/worldSessionStore';
-import { withTag, noteTurnError } from '../trace';
+import { withTag } from '../trace';
 
 export interface PostSendHooksParams {
   updated: ChatMessage[];

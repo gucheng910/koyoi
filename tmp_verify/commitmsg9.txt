@@ -1,0 +1,43 @@
+清理: 死代码与仓库卫生（阶段八）
+
+未使用声明 103 → 86。清掉的都是有把握的：
+
+死代码（确认无任何调用点后删除）：
+- characterSimulator.extractToolCalls —— 定义后从未调用；
+  批量路径用的是自己的 ___INTERACTION___ 解析器
+- characterSimulator.applyInteractionChange —— 操作裸数组的旧实现，
+  迁到 store 的 addActiveChar/removeActiveChar 后无人调用
+- stage5_assemble 的 messages / cfg 两个**参数**（连同调用点实参）——
+  重构后已不读，属于「调用方传了但被静默忽略」
+- stage4_5_router 的 recentText 参数与 chNear 局部变量
+- 各处失效导入（React、Platform、SecureStore、ApiConfig、FORMAT_RULES 等）
+
+途中差点搞坏一处：批量删除 stage5 的未使用导入时，把 OOC_RULES 一并
+删掉了，而它实际被用了 3 次。tsc 立刻报错，已恢复。
+教训：批量正则改导入很危险，必须靠 tsc 复核。
+
+仓库卫生：
+- 取消跟踪 2 个 APK（58MB）。文件保留在磁盘，只是不再进版本库。
+  它们让 .git 膨胀到 165MB。历史里的那两份无法在不 force-push 的情况下
+  移除——那需要项目所有者自己决定，我不做。
+- .gitignore 改为不再放行新 APK/AAB，并注明原因
+- 取消跟踪 开发脚本/修复补丁/ 的 88 个脚本。抽样确认 83/87 指向
+  已不存在的 D:/koyoi/src/ 路径，是历史地层而非可用工具；文件保留在磁盘
+
+新增测试 entryChapterResolver.test.ts（18 用例）：
+这个模块 81 行、逻辑正确，但**从未被任何地方调用**——因为
+FanficScreen:480-488 有一份功能更全的内联副本。
+我没有直接删除它（那会丢掉一份可测试的实现），而是先补测试把行为锁住，
+并记录了一处已知限制：「第十二章」这类中文数字不被正则识别。
+
+本轮**没有**做的（需要项目所有者决定，或风险高于收益）：
+- 8 个完全未被引用的 service 文件（breatheWorld / cardImporter /
+  chapterAwareFilter / chunkedScanner / entryChapterResolver /
+  novelSearch / novelUploader / scenarioInjector）。它们是「写好了但没接线」
+  的功能，不是垃圾。删掉会永久丢失可用实现；接线上又是每个都独立的功能
+  决策。已逐个记录在优化方案文档里。
+- novelUploader 是 FanficScreen.pickFile 的半成品提取：抽出来了但界面
+  没切过去，内联版本仍在跑。合需要动 1214 行的界面文件。
+- .git 历史瘦身（需 force-push，属不可逆操作）
+
+验证：tsc 0 错误；jest 16 套件 147 用例通过；expo export 成功（670 modules）。
