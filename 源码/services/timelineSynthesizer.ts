@@ -182,7 +182,18 @@ export async function synthesizeTimeline(
   kb: KnowledgeBase
 ): Promise<SynthesisResult | null> {
   const prompt = buildSynthesisPrompt(kb);
-  const MAX_OUT = 6000; // flash 输出稳定区间（过大反而空响应/截断）
+
+  // ── 为什么是 16000，而不是原来的 6000 ──
+  // 实测（观测台，300 万字小说、113 个块的全量分析）：MAX_OUT=6000 时，
+  // 主合成调用**两次都以 finish_reason=length 结束**，输出恰好 6000 token、
+  // 13000+ 字，JSON 被截在半句上，100% 退化到 buildCompactPrompt。
+  // 6000 根本装不下这份提示词索要的东西：全局时间线 + 角色弧线 + 关系演化 +
+  // 关键选择 + 能力时间线 + 关系里程碑 + 名场面，七类产出。
+  //
+  // 上限调高**不额外花钱**：计费按实际生成的 token 算，模型写完就停
+  //（本轮实测精简重试只用 4732 token 就自然 stop）。调高只是把
+  //「必然截断」换成「写得完」。
+  const MAX_OUT = 16000;
 
   try {
     // 第一轮
@@ -270,14 +281,88 @@ ${ruleClues || '（无）'}
   "summary": "200字概括",
   "writingStyle": "写作风格",
   "rules": {"supernatural": "超自然能力体系的完整规则（含能力变化规律，如每周刷新/旧能力退化）", "society": "社会结构", "culture": "文化", "sexualNorms": "性观念"},
-  "globalTimeline": [{"chapter":1,"time":"","event":"事件","involvedCharacters":[],"significance":"主线|支线|日常"}],
-  "characterArcs": [],
-  "relationEvolution": [],
-  "keyDecisions": [],
+  "globalTimeline": [{"chapter":1,"time":"","event":"事件","involvedCharacters":["出场角色名"],"significance":"主线|支线|日常"}],
+  "characterArcs": [{"name":"角色名","arc":"从X到Y的具体变化轨迹，不要写'成长了'","keyChapters":[转折点章节号]}],
+  "relationEvolution": [{"from":"角色A","to":"角色B","timeline":[{"chapter":1,"status":"该阶段的关系状态"}]}],
+  "keyDecisions": [{"who":"角色名","chapter":1,"dilemma":"面临的两难","chose":"最终选择","consequence":"后果"}],
   "abilities": [{"name":"能力名","owner":"角色名","start":1,"end":null,"status":"active","details":"描述"}],
   "milestones": [{"character":"角色名","milestones":[{"name":"节点名","boundEvent":"事件","chapter":null}]}],
   "scenes": [{"title":"场面名","trigger":{"location":"","characters":[],"keywords":[]},"originalPlot":"走向","chapter":1}]
-}`;
+}
+
+注意：characterArcs 覆盖主要角色（有多少写多少，无明确变化的不写）；
+relationEvolution 覆盖有关系变化的角色对；keyDecisions 列出影响剧情走向的关键抉择。
+这三项不要交回空数组——上面的逐章剧情里已经有足够素材。`;
+}
+
+/**
+ * 把合成产出的「关键节点」**富化**进逐事件的全量时间线，而不是替换它。
+ *
+ * 为什么不能直接替换——两条时间线粒度差一个数量级：
+ *   - kb.globalTimeline（buildKnowledgeBase 由 plot 展开）：逐事件，实测 1198 条
+ *   - synth.globalTimeline（AI 归纳）：只留关键节点，实测 35 条
+ * 而 chapterAwareFilter 要按「角色 + 章节」筛出已知/未知事件、
+ * dialogueContext 要取当前章附近事件，两者都依赖条目密度。
+ * 原实现 `globalTimeline: synth.globalTimeline.map(...)` 会让密度骤降 97%。
+ *
+ * 更关键的是：chapterAwareFilter 判定事件是否属于某角色，靠的是
+ * `e.involvedCharacters?.some(c => c === name)`。而 buildKnowledgeBase 里
+ * involvedCharacters 是**写死的空数组**，合成失败时 applySynthesis 也不会被调用
+ * ——于是那个「章节感知的知识边界过滤」自始至终返回空，从未生效。
+ *
+ * 所以这里：保留全量条目，把合成给出的角色归属按章节号贴回去；
+ * 合成里有、逐事件列表里没有的章节，补在末尾以免丢关键节点。
+ */
+function mergeGlobalTimeline(
+  base: KnowledgeBase['globalTimeline'] | undefined,
+  synthTimeline: SynthesisResult['globalTimeline']
+): KnowledgeBase['globalTimeline'] {
+  const synthList = Array.isArray(synthTimeline) ? synthTimeline : [];
+  const baseList = Array.isArray(base) ? base : [];
+
+  // 没有全量可比时（如直接对 AI 结果建库），就用合成结果
+  if (baseList.length === 0) {
+    return synthList.map(t => ({
+      chapter: t.chapter,
+      time: t.time || '',
+      event: t.event,
+      involvedCharacters: t.involvedCharacters || [],
+    }));
+  }
+
+  // 章节号 → 合成的角色归属 / 时间标记（同章多条时合并角色）
+  const byChapter = new Map<number, { chars: Set<string>; time: string }>();
+  for (const t of synthList) {
+    const cur = byChapter.get(t.chapter) || { chars: new Set<string>(), time: '' };
+    for (const c of (t.involvedCharacters || [])) cur.chars.add(c);
+    if (!cur.time && t.time) cur.time = t.time;
+    byChapter.set(t.chapter, cur);
+  }
+
+  const baseChapters = new Set(baseList.map(e => e.chapter));
+
+  const enriched = baseList.map(e => {
+    const hit = byChapter.get(e.chapter);
+    if (!hit) return e;
+    const already = Array.isArray(e.involvedCharacters) ? e.involvedCharacters : [];
+    return {
+      ...e,
+      time: e.time || hit.time,
+      // 已有归属的不覆盖
+      involvedCharacters: already.length > 0 ? already : [...hit.chars],
+    };
+  });
+
+  const extra = synthList
+    .filter(t => !baseChapters.has(t.chapter))
+    .map(t => ({
+      chapter: t.chapter,
+      time: t.time || '',
+      event: t.event,
+      involvedCharacters: t.involvedCharacters || [],
+    }));
+
+  return [...enriched, ...extra].sort((a, b) => a.chapter - b.chapter);
 }
 
 /**
@@ -348,12 +433,7 @@ export function applySynthesis(kb: KnowledgeBase, synth: SynthesisResult): Knowl
             })) }
         : {}),
     },
-    globalTimeline: synth.globalTimeline.map(t => ({
-      chapter: t.chapter,
-      time: t.time || '',
-      event: t.event,
-      involvedCharacters: t.involvedCharacters || [],
-    })),
+    globalTimeline: mergeGlobalTimeline(kb.globalTimeline, synth.globalTimeline),
     characters: kb.characters.map(c => {
       const arc = synth.characterArcs?.find((a: any) => a.name === c.name);
       return arc ? { ...c, arc: { description: arc.arc, keyChapters: arc.keyChapters || [] } } : c;

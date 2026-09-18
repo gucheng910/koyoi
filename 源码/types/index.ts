@@ -62,6 +62,7 @@ export interface Faction {
 export interface TimelineEvent {
   id: string;
   description: string;
+  chapter?: number;         // 原著章节下标（0-based）；来自 kb.plot，用于按章节定位事件
   inevitability: number;    // 0-1，历史惯性强度
   causes: string[];         // 深层原因
   convergencePaths: string[]; // 替代形式

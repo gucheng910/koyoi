@@ -307,16 +307,55 @@ export async function assemblePrompt(
   // 避免"说了进教室但AI还在旧场景里吃包子"的转场滞后
   const sceneLabel = routerDecision?.sceneHint || session.currentScene || '未知地点';
 
-  const dynamicParts: string[] = [
+  const worldChars = (session.world as any)?.characters || [];
+
+  // ═══════════════════════════════════════════════════════
+  //  分区组装：稳定块全部前置，易变块一律后置
+  //
+  //  为什么必须这样：DeepSeek 的上下文缓存是**按请求前缀**命中的
+  //  （命中 ¥0.02/M，未命中 ¥1/M，差 50 倍）。任何易变块一旦插在稳定块
+  //  之前，它**后面的全部内容**都会 miss。
+  //
+  //  实测（观测台真实游玩）：system[1] 的稳定前缀只到第 12,312 字符就分叉，
+  //  起因仅仅是 44 字的【能力状态】那一轮消失了；而它后面紧跟着 20,873 字
+  //  逐字不变的角色档案 —— 于是每轮白付约 1.8 万 token 的全价。
+  //
+  //  ⚠️ 以后往这里加内容时，先判断它属于哪一边：
+  //     整场会话都不变的 → stableParts；每轮可能不同的 → volatileParts。
+  //     放错边等于把后面所有内容的缓存全部作废。
+  // ═══════════════════════════════════════════════════════
+  const stableParts: string[] = [
     playerIdentityPrompt(session),
-    onStageBlock,
     '世界观：' + (session.world?.type || '') + ' | ' + (session.world?.rules?.supernatural || ''),
+    styleFeat,
+    relationGraphBlock,
+  ];
+
+  // 原著关键角色档案：不在场主角的完整档案始终注入（截断是身份/家事漂移的根源）
+  if (worldChars.length > 0) {
+    const keyRoster = worldChars.slice(0, 6).map((c: any) => {
+      // 深度画像完整注入：contradictions/signatureScenes（家庭背景/关键经历）不截断
+      const dp = c.personality?._deepProfile ? String(c.personality._deepProfile) : '';
+      return `- ${c.name}：${c.role || '未知身份'}${(c.relationship && c.relationship.status) ? '，与玩家：' + c.relationship.status : ''}${c.personality?.traits?.length ? ' | 性格：' + c.personality.traits.join('、') : ''}${dp ? ' | ' + dp : ''}`;
+    }).join(String.fromCharCode(10));
+    stableParts.push('\n【原著关键角色档案（这些角色的身份/学校/位置以此为准，不得混淆）】\n' + keyRoster);
+  }
+
+  if (session.worldBible) stableParts.push('\n世界圣经：' + session.worldBible);
+
+  if ((session.world as any)?.styleSamples?.length > 0) {
+    stableParts.push('\n原著文风锚定（旁白必须达到这个质感）：' + (session.world as any).styleSamples.slice(0, 2).map((s: string) => '「' + String(s).slice(0, 120) + '」').join('\n'));
+  }
+
+  stableParts.push('\n【角色引入】需要引入新角色时，优先使用【世界角色】中的原著角色；确需创造新角色时，必须符合原著设定逻辑（如原著提到的关系位），角色名与原著风格一致，且经 ___META___ {"newCharacter":"角色名"} 标记引入');
+  stableParts.push('【场景】场景发生转变时（如从教室走到广播台），在回复末尾添加 ___META___ {"scene":"新场景名称"}；场景未转变则不添加');
+
+  const volatileParts: string[] = [
+    onStageBlock,
     chapterPrompt,
     summaryRef.current || '',
     scenarioBlock,
-    styleFeat,
     tuningBlock,
-    relationGraphBlock,
     currentAbilities(session.world, session.currentChapter || 0, soulName, selectIds),
     currentForeshadows(session.world, session.currentChapter || 0, selectIds),
     relationshipProgress(session.world, session.currentChapter || 0, selectIds),
@@ -328,6 +367,8 @@ export async function assemblePrompt(
 
     echoCtx,
   ];
+
+  const dynamicParts: string[] = [...stableParts, ...volatileParts];
 
   // 路由器叙事方向（意图/基调/场景线索）
   const routerBlock = routerToPrompt(routerDecision);
@@ -347,16 +388,7 @@ export async function assemblePrompt(
     }
   }
 
-  // 原著关键角色档案：不在场主角的完整档案始终注入（截断是身份/家事漂移的根源）
-  const worldChars = (session.world as any)?.characters || [];
-  if (worldChars.length > 0) {
-    const keyRoster = worldChars.slice(0, 6).map((c: any) => {
-      // 深度画像完整注入：contradictions/signatureScenes（家庭背景/关键经历）不截断
-      const dp = c.personality?._deepProfile ? String(c.personality._deepProfile) : '';
-      return `- ${c.name}：${c.role || '未知身份'}${(c.relationship && c.relationship.status) ? '，与玩家：' + c.relationship.status : ''}${c.personality?.traits?.length ? ' | 性格：' + c.personality.traits.join('、') : ''}${dp ? ' | ' + dp : ''}`;
-    }).join(String.fromCharCode(10));
-    dynamicParts.push('\n【原著关键角色档案（这些角色的身份/学校/位置以此为准，不得混淆）】\n' + keyRoster);
-  }
+  // 【原著关键角色档案】已移到上方 stableParts（缓存前缀区），这里不再重复注入。
 
   // 路由器补充：玩家提及但不在场的角色 → 注入完整档案（防身份/位置幻觉）
   if (routerDecision && routerDecision.extraChars.length > 0) {
@@ -445,11 +477,7 @@ export async function assemblePrompt(
     }).join('\n'));
   }
 
-  if (session.worldBible) dynamicParts.push('\n世界圣经：' + session.worldBible);
-
-  if ((session.world as any)?.styleSamples?.length > 0) {
-    dynamicParts.push('\n原著文风锚定（旁白必须达到这个质感）：' + (session.world as any).styleSamples.slice(0, 2).map((s: string) => '「' + String(s).slice(0, 120) + '」').join('\n'));
-  }
+  // 世界圣经 / 原著文风锚定 / 【角色引入】/【场景】 均已移到上方 stableParts。
 
   // 叙事导演指示
   const dir = (session as any).directorDecision;
@@ -457,9 +485,6 @@ export async function assemblePrompt(
     const dirText = directorToPrompt(dir);
     if (dirText) dynamicParts.push(dirText);
   }
-
-  dynamicParts.push('\n【角色引入】需要引入新角色时，优先使用【世界角色】中的原著角色；确需创造新角色时，必须符合原著设定逻辑（如原著提到的关系位），角色名与原著风格一致，且经 ___META___ {"newCharacter":"角色名"} 标记引入');
-  dynamicParts.push('【场景】场景发生转变时（如从教室走到广播台），在回复末尾添加 ___META___ {"scene":"新场景名称"}；场景未转变则不添加');
 
   const dynamicSystem = dynamicParts.filter(p => p && p.trim().length > 0).join('\n');
 

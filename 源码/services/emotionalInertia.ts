@@ -97,6 +97,52 @@ export function updateMoods(
 }
 
 /**
+ * 推导玩家角色自身的情绪。
+ *
+ * 同人模式下玩家角色**不参与推演**（见 stage4_simulation 顶部注释：
+ * 玩家的行动由玩家控制，不被 AI 操控），所以 updateMoods 的入参里
+ * 永远没有玩家——实测 6 轮下来 characterMoods 只有 NPC 一个键，
+ * 玩家自己的情绪从不被追踪、也从不进入 moodsToPrompt。
+ *
+ * 这里不越权替玩家决定行动，只从「别人怎么对待玩家」反推玩家处境：
+ * 取本轮对玩家有情绪指向的 NPC 里强度最高的一条，作为玩家情绪来源。
+ * 输出仍走同一套 CharacterMoodState，下游衰减/爆发逻辑无需改动。
+ */
+export function derivePlayerMood(
+  actions: CharacterAction[],
+  playerName: string,
+  currentMoods: Record<string, CharacterMoodState>,
+  turnCount: number
+): { name: string; mood: CharacterMoodState } | null {
+  if (!playerName) return null;
+  if (currentMoods[playerName]) return null;   // 已有玩家情绪，交给正常叠加逻辑
+
+  let best: { action: CharacterAction; intensity: number } | null = null;
+  for (const a of actions) {
+    if (!a || a.name === playerName) continue;
+    // 只有指向玩家的互动才会影响玩家自己的心境
+    if (a.toward !== 'player') continue;
+    if (!a.mood || a.mood === '平静' || a.mood === 'neutral') continue;
+    const intensity = Math.min(10, 3 + (a.affectionDelta ? Math.abs(a.affectionDelta) / 10 : 0));
+    if (!best || intensity > best.intensity) best = { action: a, intensity };
+  }
+  if (!best) return null;
+
+  const { emotion } = detectEmotion(best.action.mood);
+  return {
+    name: playerName,
+    mood: {
+      emotion,
+      intensity: best.intensity,
+      cause: (best.action.triggerContext || best.action.intent || '') +
+        '（来自' + best.action.name + '）',
+      sinceRound: turnCount,
+      expressed: false,   // 玩家自己的反应由玩家决定，标记为未表达
+    },
+  };
+}
+
+/**
  * 对每一轮结束后所有角色的情绪执行衰减
  * 强度降到 1 以下时清除
  */

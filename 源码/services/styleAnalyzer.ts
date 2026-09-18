@@ -10,22 +10,54 @@ import type { ApiConfig, KnowledgeBase } from '../types';
 /**
  * 从知识库的文风样本中分析写作风格特征
  */
+/** 参与分析的样本段数 */
+const SAMPLE_COUNT = 8;
+/** 每段送入模型的字符上限。留足句长/标点这类统计特征的样本量 */
+const SAMPLE_CHARS = 600;
+
 export async function analyzeStyleFeatures(
   config: ApiConfig,
   kb: KnowledgeBase
 ): Promise<string> {
-  const samples = kb.styleProfile
-    .flatMap(s => s.samples)
-    .filter(Boolean)
-    .slice(0, 8);
+  // 取样必须「沿全书均匀」。
+  //
+  // 原实现是 styleProfile.flatMap(s => s.samples).slice(0, 8) —— 只取前 8 段。
+  // 但 styleProfile 的数组顺序是**块完成的顺序**，而 analyzeAllChunks 是 3~5 并发，
+  // 顺序并不确定：实测分析 300 万字小说时，取到的 8 段来自最先返回的两三个块
+  //（styleProfile[0] 是「第29~42章」而不是第 1 章），只覆盖全书约 0.08% 的正文，
+  // 却要拿去定义整本书的文风、并指导每一轮对话的抛光。
+  //
+  // 改为先按章节号排序，再等距抽样，让样本横跨全书。
+  const ordered = (kb.styleProfile || [])
+    .filter(s => Array.isArray(s.samples) && s.samples.some(Boolean))
+    .sort((a, b) => (a.chapterRange?.[0] ?? 0) - (b.chapterRange?.[0] ?? 0));
 
-  if (samples.length < 2) {
-    console.warn('[STYLE] not enough samples: ' + samples.length + ' styleProfile=' + (kb.styleProfile?.length || 0));
+  const picked: Array<{ text: string; chapter: number }> = [];
+  if (ordered.length > 0) {
+    const step = Math.max(1, Math.floor(ordered.length / SAMPLE_COUNT));
+    for (let i = 0; i < ordered.length && picked.length < SAMPLE_COUNT; i += step) {
+      const text = ordered[i].samples.find(Boolean);
+      if (text) picked.push({ text, chapter: ordered[i].chapterRange?.[0] ?? 0 });
+    }
+    // 等距抽样受步长取整影响可能少取一两段，从尾部补足
+    for (let i = ordered.length - 1; i >= 0 && picked.length < SAMPLE_COUNT; i--) {
+      const text = ordered[i].samples.find(Boolean);
+      if (text && !picked.some(p => p.text === text)) {
+        picked.push({ text, chapter: ordered[i].chapterRange?.[0] ?? 0 });
+      }
+    }
+  }
+
+  if (picked.length < 2) {
+    console.warn('[STYLE] not enough samples: ' + picked.length + ' styleProfile=' + (kb.styleProfile?.length || 0));
     return '';
   }
 
-  console.log('[STYLE] analyzing with ' + samples.length + ' samples');
-  const sampleText = samples.map((s, i) => '[sample' + (i + 1) + ']\n' + s.slice(0, 400)).join('\n\n');
+  console.log('[STYLE] analyzing ' + picked.length + ' samples from chapters ' +
+    picked.map(p => p.chapter + 1).join(','));
+  const sampleText = picked
+    .map((p, i) => '[sample' + (i + 1) + ' 第' + (p.chapter + 1) + '章]\n' + p.text.slice(0, SAMPLE_CHARS))
+    .join('\n\n');
 
   try {
     const prompt = [

@@ -110,15 +110,31 @@ cd android && ./gradlew assembleRelease
 
 ## 🏗️ 项目结构
 
+> 源码目录是 **`源码/`**（非 `src/`），入口为根目录的 `App.tsx`。
+
 ```
-src/
+源码/
 ├── api/              DeepSeek API 封装（流式/同步/抛光/用量追踪）
-├── screens/          页面组件
+├── screens/          页面组件（HomeScreen / FanficScreen / WorldChatScreen …）
 ├── services/         核心服务（分章/分析/知识库/角色推演/编码/存储）
-├── prompts/          AI 提示词模板
+│   └── sendPipeline/ 对话主链路，9 个阶段文件（stage1_input … stage8_hooks）
+├── prompts/          AI 提示词模板（base / worldRules / characters）
 ├── components/       通用 UI 组件
 ├── store/            Zustand 状态管理
+├── theme/            深浅色主题与安全区适配
 └── types/            TypeScript 类型定义
+```
+
+更详细的模块说明见 `PROJECT_PROFILE.md`。
+
+### 对话主链路（sendPipeline）
+
+`WorldChatScreen.send()` 是唯一调用方，阶段之间按依赖串并行：
+
+```
+processInput → maybeGenerateSummary → buildContext
+  → [ runCharacterSimulation ∥ routeContent ]   ← 并行
+  → assemblePrompt → callAI → postProcessResponse → runPostSendHooks
 ```
 
 ## 📖 工作流

@@ -8,23 +8,65 @@ import * as FileSystem from 'expo-file-system/legacy';
 import type { ChapterAnalyzeResult, KnowledgeBase } from '../types';
 import { getNovelDir } from './novelStorage';
 
+// 模型对"没有别名"的角色会输出这些占位词。若把它们当真实别名参与匹配，
+// 所有无别名角色会因共用 "无别名" 而被错误合并到同一条记录上。
+const PLACEHOLDER_ALIASES = new Set([
+  '无别名', '无', '暂无', '无别名（无）', '没有', '未知', 'none', 'n/a', '无别名。', '—', '-', '',
+]);
+
+function isPlaceholderAlias(a: unknown): boolean {
+  if (typeof a !== 'string') return true;
+  const s = a.trim();
+  if (s.length < 2) return true;
+  if (PLACEHOLDER_ALIASES.has(s.toLowerCase())) return true;
+  // "别名(无)" / "别名（无）" / "无别名(暂无)" 这类包裹写法
+  const inner = s.replace(/^别名\s*[（(]/, '').replace(/[)）]$/, '').trim();
+  return PLACEHOLDER_ALIASES.has(inner.toLowerCase());
+}
+
+/** 取出一个角色记录里真正可用的别名（过滤占位词与自我指涉） */
+function realAliases(c: { name?: string; aliases?: unknown }): string[] {
+  const out: string[] = [];
+  for (const a of (c.aliases as unknown[]) || []) {
+    if (isPlaceholderAlias(a)) continue;
+    const s = (a as string).trim();
+    if (!s || s === c.name) continue;
+    // "别名(陈源)" 这类包裹写法若解开后等于本人名字，也不是有效别名
+    const inner = s.replace(/^别名\s*[（(]/, '').replace(/[)）]$/, '').trim();
+    if (inner && inner === c.name) continue;
+    if (!out.includes(s)) out.push(s);
+  }
+  return out;
+}
+
 /**
  * 角色去重合并：按名字 + 别名匹配
+ *
+ * 注意：别名匹配必须是**双向且以名字为准**的。原先的 `ch.aliases.some(...)`
+ * 只要任一别名出现在对方名字或别名表中就判定为同一人，配合模型输出的
+ * "无别名" 占位词，会把全书角色都合并进第一条记录（实测主角被灌入 34 条
+ * 来自其他角色的 traits）。因此这里：
+ *   1. 过滤占位别名；
+ *   2. 名字精确相等优先；
+ *   3. 别名互查时也要求别名本身不是占位词。
  */
 function mergeCharacters(allResults: ChapterAnalyzeResult[]): KnowledgeBase['characters'] {
   const merged: KnowledgeBase['characters'] = [];
 
   for (const result of allResults) {
     for (const ch of result.characters) {
-      // 查找是否已存在（按名字完全匹配 或 别名重叠）
-      const existing = merged.find(m =>
-        m.name === ch.name ||
-        ch.aliases.some(a => m.name === a || m.aliases.includes(a))
-      );
+      const chAliases = realAliases(ch as any);
+      const existing = merged.find(m => {
+        if (m.name === ch.name) return true;
+        const mAliases = realAliases(m as any);
+        if (mAliases.length === 0 && chAliases.length === 0) return false;
+        // 交叉匹配：只在双方都有真实别名时才有意义
+        return chAliases.some(a => a === m.name || mAliases.includes(a));
+      });
 
       if (existing) {
-        // 合并别名
-        for (const a of ch.aliases) {
+        // 合并别名（跳过占位词，避免 "无别名" 之类的垃圾写进知识库）
+        for (const a of chAliases) {
           if (!existing.aliases.includes(a) && a !== existing.name) {
             existing.aliases.push(a);
           }
@@ -94,7 +136,12 @@ function mergeCharacters(allResults: ChapterAnalyzeResult[]): KnowledgeBase['cha
           existing.gender = ch.gender;
         }
       } else {
-        merged.push({ ...ch });
+        // 新记录：同样清掉占位别名，并压平可能重复的 traits
+        merged.push({
+          ...ch,
+          aliases: chAliases,
+          traits: Array.from(new Set(ch.traits || [])),
+        } as any);
       }
     }
   }
@@ -248,6 +295,15 @@ export async function saveKnowledgeBase(kb: KnowledgeBase): Promise<void> {
     { name: 'plot.json', data: kb.plot },
     { name: 'style.json', data: kb.styleProfile },
     { name: 'world.json', data: kb.worldSettings },
+    // 合成的全局时间线必须落盘。
+    // 原先这里没有它，于是 synthesizeTimeline 产出的 involvedCharacters /
+    // time / significance 只活在**首次会话**的内存里：一重启，loadKnowledgeBase
+    // 就从 plot 重建一份，且 involvedCharacters 一律补成 []。
+    // 下游 chapterAwareFilter / knowledgeGraph / dialogueContext /
+    // characterDeepDive 全都读 globalTimeline——其中 characterDeepDive 明写
+    // 「优先用 involvedCharacters，缺失时退回按摘要匹配角色名」，
+    // 也就是说重启后它永远走 fallback，且不报错。
+    { name: 'timeline.json', data: kb.globalTimeline },
     // 不写 index.json：避免大对象 JSON.stringify OOM
   ];
 
@@ -299,11 +355,19 @@ export async function loadKnowledgeBase(worldId: string): Promise<KnowledgeBase 
       }
       // 从 chapterCount 推断或从 plot 计算
       const maxChapter = plot.length > 0 ? Math.max(...plot.map((p: any) => p.chapter || 0)) + 1 : 1;
+
+      // 优先用合成的全局时间线（带 involvedCharacters / time / significance）；
+      // 没有 timeline.json 时（老数据、或合成失败）才从 plot 重建裸版本。
+      const savedTimeline = await loadJsonFile(dir + 'timeline.json');
+      const globalTimeline = Array.isArray(savedTimeline) && savedTimeline.length > 0
+        ? savedTimeline
+        : plot.map((p: any) => ({ chapter: p.chapter, time: '', event: p.summary, involvedCharacters: [] }));
+
       return {
         worldId, analyzedAt: '', chapterCount: maxChapter, analyzedChunks: 0,
         characters: chars, relations, plot,
         worldSettings: worldSettings as KnowledgeBase['worldSettings'],
-        styleProfile, globalTimeline: plot.map((p: any) => ({ chapter: p.chapter, time: '', event: p.summary, involvedCharacters: [] })),
+        styleProfile, globalTimeline,
         worldRuleClues: [],
         foreshadows: (worldSettings as any).foreshadows || [],
       };

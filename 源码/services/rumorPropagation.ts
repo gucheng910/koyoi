@@ -70,9 +70,67 @@ export function extractNotableEvents(
   return events.slice(0, 3); // 最多 3 个事件
 }
 
+/**
+ * 摘出包含关键词的**完整句子**（按中英文句末标点切分）。
+ *
+ * 原实现是 `.{0,30}<keyword>.{0,30}` 再硬截 80 字，实测产出的是
+ * 从句子中间开始的碎片，例如：
+ *   "刺" / "不知道" / "，又像是在数什么。她的话戛然而止"
+ * 这些碎片被当成「事实」写进角色知识库并沿社交网络传播，
+ * 传播出去的信息毫无意义。改为按句边界取值。
+ */
 function extractedDescription(text: string, pattern: (typeof NOTABLE_PATTERNS)[0]): string {
-  const match = text.match(new RegExp(`.{0,30}${pattern.regex.source}.{0,30}`, 'i'));
-  return match ? match[0].trim().slice(0, 80) : text.slice(0, 80);
+  try {
+    const re = new RegExp(pattern.regex.source, 'i');
+    const m = text.match(re);
+    if (!m || m.index === undefined) return firstSentences(text, 80);
+
+    const idx = m.index;
+    // 向前找最近的句末标点（句首）
+    const before = text.slice(0, idx);
+    const lastEnd = Math.max(
+      before.lastIndexOf('。'), before.lastIndexOf('！'), before.lastIndexOf('？'),
+      before.lastIndexOf('；'), before.lastIndexOf('\n'),
+      before.lastIndexOf('.'), before.lastIndexOf('!'), before.lastIndexOf('?'),
+    );
+    const start = lastEnd >= 0 ? lastEnd + 1 : 0;
+
+    // 向后找最近的句末标点（句尾）
+    const after = text.slice(idx);
+    let endRel = -1;
+    for (let i = 0; i < after.length; i++) {
+      if ('。！？；\n.!?'.includes(after[i])) { endRel = i + 1; break; }
+    }
+    const end = endRel > 0 ? idx + endRel : idx + after.length;
+
+    let sentence = text.slice(start, end).trim();
+    // 句子过长则再按逗号收一刀，避免塞爆知识库
+    if (sentence.length > 120) {
+      const parts = sentence.split(/[，,]/);
+      let acc = '';
+      for (const p of parts) {
+        if (acc && (acc + '，' + p).length > 100) break;
+        acc = acc ? acc + '，' + p : p;
+      }
+      sentence = acc || sentence.slice(0, 100);
+    }
+    return sentence || firstSentences(text, 80);
+  } catch {
+    return firstSentences(text, 80);
+  }
+}
+
+/** 兜底：取开头若干完整句子 */
+function firstSentences(text: string, maxLen: number): string {
+  const s = String(text || '').trim();
+  if (!s) return '';
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    out += s[i];
+    if ('。！？\n'.includes(s[i]) && out.length >= maxLen * 0.5) break;
+    if (out.length >= maxLen) break;
+  }
+  return out.trim().slice(0, maxLen);
 }
 
 /**

@@ -26,3 +26,28 @@ jobs:
 
       - name: Test
         run: npm test -- --ci --coverage
+
+  # R8 的 keep 规则回归只在 release 构建才暴露（见 gradle.properties 中的
+  # android.enableMinifyInReleaseBuilds），typecheck/test 都拦不住。
+  # release 用的是 debug.keystore，所以这里不需要任何 secret。
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon

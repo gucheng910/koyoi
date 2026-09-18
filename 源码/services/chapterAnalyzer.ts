@@ -9,12 +9,14 @@ import { safeParseJSON } from './utils';
 import * as FileSystem from 'expo-file-system/legacy';
 import { getNovelDir, getChapter } from './novelStorage';
 import type { ApiConfig, ChapterAnalyzeResult } from '../types';
-import type { AnalysisChunk } from './chunkAssembler';
+// 值导入（非 type-only）：截断长度与组块器共用同一个常量，
+// 避免再次出现「组 6 万字、只喂 2.8 万字」的静默失配。
+import { ANALYSIS_CHUNK_MAX_CHARS, type AnalysisChunk } from './chunkAssembler';
 
 const ANALYZE_SYSTEM_SIMPLE = `你是小说分析引擎。从以下小说片段中提取角色、事件、文风。直接返回JSON，不要任何解释文字。`;
 
 function buildSimplePrompt(chunk: AnalysisChunk, chunkText: string): string {
-  return `分析第${chunk.chapterStart+1}~${chunk.chapterEnd+1}章。提取角色（真实名字）、事件、文风段落、能力/规则线索。\n\n只返回JSON（注意"name"要填角色的真实名字，不要填"角色名"三个字）：\n{\n  "characters": [{"name":"这里填角色真实名字","gender":"男/女/未知","role":"身份","traits":["性格词"],"dialogue":["原文台词"]}],\n  "events": [{"chapter":${chunk.chapterStart+1},"event":"发生了什么"}],\n  "worldRules": ["超自然能力/规则线索，如：主角能力每周刷新旧能力退化"],\n  "styleSamples": ["原文段落"]\n}\n\n小说片段：\n${chunkText.slice(0, 28000)}`;
+  return `分析第${chunk.chapterStart+1}~${chunk.chapterEnd+1}章。提取角色（真实名字）、事件、文风段落、能力/规则线索。\n\n只返回JSON（注意"name"要填角色的真实名字，不要填"角色名"三个字）：\n{\n  "characters": [{"name":"这里填角色真实名字","gender":"男/女/未知","role":"身份","traits":["性格词"],"dialogue":["原文台词"]}],\n  "events": [{"chapter":${chunk.chapterStart+1},"event":"发生了什么"}],\n  "worldRules": ["超自然能力/规则线索，如：主角能力每周刷新旧能力退化"],\n  "styleSamples": ["原文段落"]\n}\n\n小说片段：\n${chunkText.slice(0, ANALYSIS_CHUNK_MAX_CHARS)}`;
 }
 
 const ANALYZE_SYSTEM = `你是小说分析引擎。你的任务是逐块提取小说信息，为后续全局合成提供原材料。
@@ -119,7 +121,7 @@ function buildAnalyzePrompt(chunk: AnalysisChunk, chunkText: string): string {
 }
 
 小说片段：
-${chunkText.slice(0, 28000)}`;
+${chunkText.slice(0, ANALYSIS_CHUNK_MAX_CHARS)}`;
 }
 
 /**
@@ -389,6 +391,18 @@ export async function analyzeChunk(
   const chunkText = texts.join('\n\n') || '';
   if (chunkText.length < 50) return null;
 
+  // 最后一道防线。组块阶段（chunkAssembler）已保证不超限，正常不会触发；
+  // 唯一可能触发的是**单章本身超过上限**——那种情况无法再切分，
+  // 但必须留痕：历史版本在这里静默丢弃了全书 43.5% 的正文而无人察觉。
+  if (chunkText.length > ANALYSIS_CHUNK_MAX_CHARS) {
+    console.warn(
+      '[ANALYZE] 块 ' + chunk.chunkIndex + ' 正文超限被截断: ' +
+      chunkText.length + ' -> ' + ANALYSIS_CHUNK_MAX_CHARS +
+      '（章节 ' + (chunk.chapterStart + 1) + '~' + (chunk.chapterEnd + 1) +
+      '，疑似单章本身过长）'
+    );
+  }
+
   // 第一轮：标准分析
   const prompt = buildAnalyzePrompt(chunk, chunkText);
   try {
@@ -464,13 +478,18 @@ export async function analyzeAllChunks(
 
   // 流水线式并发：每完成一个块立即启动下一个
   const remaining = chunks.slice(completed);
+  // 本轮开始时已完成的块数（断点续传的基线）。注意不能用会自增的
+  // `completed` 去算全局进度：它在本轮里每完成一块就 +1，再叠加 idx
+  // 会双重计数，导致进度很快越过总数（实测出现 "23/13 块"、
+  // 以及 FanficScreen 里 (total-cur) 变负后倒计时显示 -86 秒）。
+  const baseline = completed;
   let nextIdx = 0;
 
   const worker = async (): Promise<void> => {
     while (nextIdx < remaining.length && !signal?.aborted) {
       const idx = nextIdx++;
       const chunk = remaining[idx];
-      const globalIdx = completed + idx + 1;
+      const globalIdx = Math.min(baseline + idx + 1, chunks.length);
       onProgress(globalIdx, chunks.length, chunk);
       try {
         const r = await analyzeChunk(config, worldId, chunk);

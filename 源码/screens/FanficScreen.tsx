@@ -328,14 +328,16 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
       const analyzeStart = Date.now();
       const results = await analyzeAllChunks(cfg, worldCard?.id || '', chapters, chunks, (cur, total, chunk) => {
         const elapsed = (Date.now() - analyzeStart) / 1000;
-        const avgPerChunk = elapsed / cur;
-        const remaining = (total - cur) * avgPerChunk;
+        // cur 在断点续传/并发下可能短暂超过 total，钳住避免倒计时变负数
+        const done = Math.min(Math.max(cur, 0), total);
+        const avgPerChunk = done > 0 ? elapsed / done : 0;
+        const remaining = Math.max(0, (total - done) * avgPerChunk);
         const eta = remaining < 120
           ? Math.round(remaining) + '秒'
           : Math.floor(remaining / 60) + '分' + Math.round(remaining % 60) + '秒';
         const elapsedMin = Math.floor((Date.now() - analyzeStart) / 60000);
         const chapterRange = chunk.chapterStart === chunk.chapterEnd ? '第' + (chunk.chapterStart+1) + '章' : '第' + (chunk.chapterStart+1) + '~' + (chunk.chapterEnd+1) + '章';
-        setParseProgress({ current: cur, total, elapsed: elapsedMin });
+        setParseProgress({ current: done, total, elapsed: elapsedMin });
         setParsingStatus(chapterRange + '（' + (chunk.charCount / 1000).toFixed(0) + 'k字）\n已用 ' + elapsedMin + ' 分钟，预计还需 ' + eta);
       }, signal);
       if (results.length === 0) throw new Error('全部分析失败');
@@ -437,7 +439,7 @@ export default function FanficScreen({ isDark, onStart, onBack }: Props) {
   function buildWorldCardFromKB(kb: KnowledgeBase, meta?: NovelMeta | null, synthWorldType?: string, styleFeatures?: string): FanficWorldCard {
     const chars: Character[] = kb.characters.map((c, i) => kbCharToCharacter(c as any, kb.worldId, i, meta?.title));
     const timeline: TimelineEvent[] = kb.plot.filter(p => p.summary).map((p, i) => ({
-      id: 'tl_' + i, description: p.summary, inevitability: 0.5, causes: [], convergencePaths: [], originalOutcome: p.summary, status: 'pending' as const,
+      id: 'tl_' + i, description: p.summary, chapter: p.chapter, inevitability: 0.5, causes: [], convergencePaths: [], originalOutcome: p.summary, status: 'pending' as const,
     }));
     const locs = kb.worldSettings.geography.split('\n').filter(Boolean).map((l: string) => { const p = l.split('：'); return { name: p[0] || '', description: p.slice(1).join('：') || '' }; });
     return {
@@ -952,7 +954,7 @@ ${isSoul ? '- 魂穿：写出意识进入新身体的错位感。你发现自己
                 <Text style={st.label}>关键剧情</Text>
                 <View style={{ backgroundColor: isDark ? '#1A1814' : '#E8DCC8', borderRadius: 8, padding: 10, marginBottom: 10 }}>
                   {worldCard.timeline.slice(0, 15).map((e, i) => (
-                    <Text key={i} style={{ fontSize: 12, color: isDark ? '#aaa' : '#888', marginBottom: 4 }}>{i+1}. {typeof e === 'string' ? e : ((e as any).event || (e as any).description || '')}</Text>
+                    <Text key={i} style={{ fontSize: 12, color: isDark ? '#aaa' : '#888', marginBottom: 4 }}>{i+1}. {typeof (e as any).chapter === 'number' ? '第' + ((e as any).chapter + 1) + '章 · ' : ''}{typeof e === 'string' ? e : ((e as any).event || (e as any).description || '')}</Text>
                   ))}
                 </View>
               </>
@@ -1087,7 +1089,7 @@ ${isSoul ? '- 魂穿：写出意识进入新身体的错位感。你发现自己
                 <Text style={{ fontSize: 13, fontWeight: '700', color: '#5577aa', marginTop: 12, marginBottom: 8 }}>关键剧情</Text>
                 {worldCard.timeline.slice(0, 10).map((e, i) => (
                   <Text key={i} style={{ fontSize: 11, color: isDark ? '#aaa' : '#888', marginBottom: 2 }}>
-                    {i+1}. {typeof e === 'string' ? e : ((e as any).event || (e as any).description || '')}
+                    {i+1}. {typeof (e as any).chapter === 'number' ? '第' + ((e as any).chapter + 1) + '章 · ' : ''}{typeof e === 'string' ? e : ((e as any).event || (e as any).description || '')}
                   </Text>
                 ))}
                 {(worldCard.keyDecisions || []).length > 0 && (

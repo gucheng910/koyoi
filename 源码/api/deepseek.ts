@@ -287,13 +287,21 @@ async function readStream(
   let finalUsage: any = null;  // 流式响应中 usage 可能多次出现（部分API每个chunk都带），只取最后一次避免重复计费
 
   try {
+    // 标签化外层循环：收到 [DONE] 必须整体退出。
+    // 原先的 `break` 只跳出内层 for，外层 while(true) 会继续 read()，
+    // 上游若在 [DONE] 之后再吐一帧（部分网关会重发尾部内容），
+    // 就会被再次 fullText += 拼接，表现为回答里整句复读。
+    streamLoop:
     while (true) {
-      // 30 秒无数据判定断线，避免 API 连接断开后永久挂起
+      // 30 秒无数据判定断线，避免 API 连接断开后永久挂起。
+      // 注意：超时会 cancel() 掉连接，正文可能被**截在半句**上（实测
+      // 出现过 "你知道她为什么没" 这种戛然而止的输出）。因此这里不能
+      // 静默吞掉——要把「已收到的部分正文」和「被截断」这个事实一起报出去。
       const readPromise = reader.read();
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => {
           reader.cancel().catch(() => {}); // 取消挂起的读取，释放连接
-          reject(new Error('流式响应超时，请重试'));
+          reject(new Error('流式响应超时(30s 无数据)，输出可能不完整'));
         }, 30000)
       );
       const { done, value } = await Promise.race([readPromise, timeoutPromise]);
@@ -308,7 +316,7 @@ async function readStream(
         if (!trimmed || !trimmed.startsWith('data: ')) continue;
 
         const data = trimmed.slice(6);
-        if (data === '[DONE]') break;  // 流结束，立即退出（API 可能保持连接不关闭）
+        if (data === '[DONE]') break streamLoop;  // 流结束，整体退出
 
         try {
           const parsed = JSON.parse(data);
@@ -341,7 +349,20 @@ async function readStream(
     if (e.name === 'AbortError') return '';
     // 同上：保留真实原因，不再一律报「网络连接失败」
     const detail = e?.message || String(e);
-    console.warn('[deepseek] readStream failed: ' + e?.name + ' | ' + detail);
+    console.warn('[deepseek] readStream failed: ' + e?.name + ' | ' + detail +
+      ' | partialLen=' + fullText.length);
+
+    // 已经收到正文时（典型：30s 无数据超时把连接掐了），
+    // 不要丢弃它——否则用户看到的是「什么都没有」，而日志里只有一行超时，
+    // 无从判断是模型没说话还是输出被截断。这里把已收到的部分照常交付，
+    // 同时把「可能不完整」的事实通过 onError 上报，两者都保留。
+    if (fullText.length > 0) {
+      console.warn('[deepseek] delivering partial stream (' + fullText.length + ' chars)');
+      onError?.(new Error('输出可能不完整：' + detail));
+      onComplete?.(fullText);
+      return fullText;
+    }
+
     onError?.(new Error('流式读取失败（' + (e?.name || 'Error') + '）：' + detail));
     return '';
   }

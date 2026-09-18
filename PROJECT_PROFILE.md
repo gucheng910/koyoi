@@ -4,12 +4,11 @@
 
 Koyoi 是一个 AI 互动小说引擎，基于 Expo SDK 56 + React Native + TypeScript + Zustand 构建。核心流程：上传小说 → AI 分章分析 → 魂穿到角色 → 沉浸式群像对话。
 
-- **97 文件 / 965 节点** (codegraph 索引)
-- **64 TS + 18 TSX** 源文件
+- **120 个 TS/TSX 源文件**（含 29 个测试文件，91 个生产文件）
 - **入口**: `App.tsx`
-- **API 层**: DeepSeek V4 (OpenAI 兼容)，`src/api/deepseek.ts`
+- **API 层**: DeepSeek V4 (OpenAI 兼容)，`源码/api/deepseek.ts`
 - **存储**: AsyncStorage (会话) + FileSystem (小说章节) + SecureStore (API Key)
-- **codegraph**: `C:\codegraph\codegraph.bat`，索引在 `D:\koyoi\.codegraph\`
+- **门禁**: `npm run typecheck`（tsc）+ `npm test`（jest）；CI 见 `.github/workflows/ci.yml`
 
 ## 核心路由 (App.tsx)
 
@@ -25,8 +24,8 @@ AppContent 根据状态渲染不同全屏视图：
 
 ## 发送管线 (对话核心路径)
 
-**旧**: `sendPipeline.ts` (600+ 行单体)
-**新**: `sendPipeline/` 目录，8 个独立 stage 文件 + `index.ts` 重导出
+**旧**: `sendPipeline.ts` (600+ 行单体，已删除)
+**新**: `sendPipeline/` 目录，9 个独立 stage 文件 + `index.ts` 重导出
 
 ```
 WorldChatScreen.send()
@@ -34,13 +33,17 @@ WorldChatScreen.send()
   ├─ stage2_summary.ts    maybeGenerateSummary — 每 10 轮压缩摘要
   ├─ stage3_context.ts    buildContext         — 上下文构建 + 章节感知
   ├─ stage4_simulation.ts runCharacterSimulation — 角色推演 + 好感度 + 行为画像
+  ├─ stage4_5_router.ts   routeContent         — 内容路由（场景/分支判定）
   ├─ stage5_assemble.ts   assemblePrompt       — 提示词组装 (稳定前缀 + 动态层)
   ├─ stage6_call.ts       callAI               — DeepSeek API 调用
   ├─ stage7_post.ts       postProcessResponse  — 抛光 + NPC 引入解析
   └─ stage8_hooks.ts      runPostSendHooks     — 后置钩子 (时钟/情绪/谣言/记忆/章节追踪/A2A)
 ```
 
-调用方: `WorldChatScreen.tsx:26` 导入自 `sendPipeline/index`
+其中 **stage4 的 `runCharacterSimulation` 与 `stage4_5` 的 `routeContent` 并行执行**
+（`WorldChatScreen.tsx` 中 `Promise.all`），二者互不依赖。
+
+调用方: `WorldChatScreen.tsx:15-16` 导入自 `sendPipeline/index`
 
 ## 服务层架构
 
@@ -119,21 +122,52 @@ CharacterBehaviorProfile → { priorityHierarchy, pressurePoints, breakingPoint,
 ## 已知架构特征
 
 - `require()` 调用: **0** (全部消除为静态 import)
-- 测试覆盖率: 4 个文件 (chapterSplitter, characterAdapter, costEstimate, utils)
-- `as any` 转型: 已大幅减少 (Personality 正式化了 _deepProfile + promptOverride)
-- 所有 catch 块: 关键路径有 console.warn 标记
+- `TODO` / `FIXME` / `@ts-ignore`: **0**（`源码/` 全目录）
+- 测试: **29 个文件 / 305 用例**，`npm test` 全绿；`tsc --noEmit` 0 错误
+- `as any` 转型: 实测 **111 处**（此前文档记的 27 处已过时）。
+  分布不在 FanficScreen，而是 `knowledgeBase.ts`(24) / `FanficScreen.tsx`(22) /
+  `stage5_assemble.ts`(11) / `characterDeepDive.ts`(9) / `worldStore.ts`(8)
+- catch 块: 共 182 个，其中 **48 个是裸 `catch {}`**（无任何日志），
+  集中在 `novelStorage.ts`(7) / `chapterAnalyzer.ts`(6) / `sessionStorage.ts`(5)。
+  这些点位出问题时是静默的，排查前需先知道它们存在
 - WorldChatScreen 导入: 单一来源 `sendPipeline/index`
 
 ## FanficScreen 现状
 
-- ~1060 行，7 个导出符号
-- 27 个 useState (待收敛为 useReducer)
+- 1215 行，7 个导出符号
+- 36 个 useState (待收敛为 useReducer) — 见下「已知待办」
 - 6 个内联异步函数: pickAndUploadNovel 已提取到 novelUploader.ts
 - 其余: parseNovel, buildOpening, appendFile, appendToExistingWorld, startGame
 - `worldRepair.ts` 新增 `normalizeAllWorldData()` 用于无 AI 规则修补
 
+## 已知待办
+
+- `FanficScreen.tsx` 的 36 个 useState 收敛为 `useReducer`
+- CI 已补 android job（`gradlew assembleRelease`），覆盖 R8 keep 规则回归。
+  注意它跑在 GitHub runner 上，**本机因卡巴斯基 TLS 中间人需要绕行**（见下）
+- `.git` 约 130MB（历史中有已删除的 APK），尚未做 history rewrite
+
+## 本机构建须知（Windows + 卡巴斯基）
+
+这台机器上卡巴斯基的「加密连接扫描」会做 TLS 中间人，导致所有不读 Windows
+证书库的运行时随机握手失败：
+
+- **Node/undici**：报 `SELF_SIGNED_CERT_IN_CHAIN`。解法是
+  `NODE_EXTRA_CA_CERTS=<导出的根证书 PEM>`
+- **JVM/Gradle**：报 `PKIX path building failed`。解法是
+  `JAVA_TOOL_OPTIONS=-Djavax.net.ssl.trustStore=<cacerts 副本 + 根证书> -Djavax.net.ssl.trustStorePassword=changeit`
+- **gradle wrapper 会卡在下载发行包**（`services.gradle.org`）。可绕过 wrapper，
+  直接用缓存里已解包的发行版：
+  `~/.gradle/wrapper/dists/gradle-<ver>-bin/<hash>/gradle-<ver>/bin/gradle.bat`
+- 证书导出：`Cert:\LocalMachine\Root` 里找
+  `CN=Kaspersky Anti-Virus Personal Root Certificate, O=AO Kaspersky Lab`
+
 ## 常见操作
 
-**增量索引**: `Set-Location D:\koyoi; C:\codegraph\codegraph.bat sync`
-**查询**: 使用 `mcp_codegraph_codegraph_explore` + `projectPath: "D:\\koyoi"`
-**读取文件**: `mcp_codegraph_codegraph_node` + `file` 参数
+```bash
+npm run typecheck     # tsc --noEmit
+npm test              # jest（23 suites / 267 tests）
+npm run android       # expo run:android
+```
+
+构建 release APK：`cd android && ./gradlew assembleRelease`（仅 arm64-v8a / x86_64）。

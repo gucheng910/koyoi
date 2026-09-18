@@ -11,7 +11,7 @@ import { extractMemories } from '../worldInfoService';
 import { generateBackgroundInteraction, applyBackgroundInteraction } from '../backgroundInteraction';
 import { loadKnowledgeBase } from '../knowledgeBase';
 import { KnowledgeGraph } from '../knowledgeGraph';
-import { decayMoods, updateMoods } from '../emotionalInertia';
+import { decayMoods, updateMoods, derivePlayerMood } from '../emotionalInertia';
 import { generateWorldPulse } from '../worldClock';
 import { extractNotableEvents, propagateRumors } from '../rumorPropagation';
 import type { WorldSession, ChatMessage, CharacterKnowledge, MemoryItem } from '../../types';
@@ -54,11 +54,23 @@ export async function runPostSendHooks(params: PostSendHooksParams) {
     const nextWorldClock = (session.worldClock || 0) + 1;
 
     // 情绪惯性：将角色推演结果同步到情绪系统
-    const moodsAfterActions = (charActions && charActions.length > 0)
+    let moodsAfterActions = (charActions && charActions.length > 0)
       ? updateMoods(charActions, session.characterMoods || {}, turn)
       : (session.characterMoods || {});
     if (charActions && charActions.length > 0) {
       console.log('[MOOD] updated from ' + Object.keys(moodsAfterActions).length + ' chars');
+    }
+
+    // 玩家角色不参与推演，其情绪需从「NPC 如何对待玩家」反推，
+    // 否则玩家的心境永远不进 moodsToPrompt（实测 6 轮只有 NPC 有情绪）。
+    const playerName = session.selectedCharacters?.[0]?.name || '';
+    if (playerName && charActions && charActions.length > 0) {
+      const pm = derivePlayerMood(charActions, playerName, moodsAfterActions, turn);
+      if (pm) {
+        moodsAfterActions = { ...moodsAfterActions, [pm.name]: pm.mood };
+        console.log('[MOOD] player mood ' + pm.name + '=' + pm.mood.emotion +
+          ' intensity=' + pm.mood.intensity.toFixed(1));
+      }
     }
 
     // 情绪衰减（即使没有推演结果也执行）——基于刚合并过的 moods

@@ -1,6 +1,6 @@
 {
   "name": "koyoi",
-  "version": "2.20.0",
+  "version": "2.21.0",
   "private": true,
   "main": "index.ts",
   "description": "AI驱动的互动小说引擎 — 上传txt小说，魂穿到故事中。支持 DeepSeek V4，完全本地存储。",
