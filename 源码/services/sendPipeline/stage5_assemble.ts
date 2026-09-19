@@ -5,6 +5,7 @@
 import {
   NARRATOR_BASE, NARRATOR_FANFIC_APPEND, VOCAB_LOCK, POST_HISTORY_BASE, WORLD_RULES, ANTI_AI_PATTERN,
 } from '../../prompts/worldRules';
+import { buildRuleModules, buildTailNote, getPrefillText } from '../../prompts/modules';
 import { getWorldState } from '../../store/worldSessionStore';
 import { OOC_RULES } from '../../prompts/tokens';
 import { contextToPrompt } from '../dialogueContext';
@@ -504,10 +505,44 @@ export async function assemblePrompt(
   }
 
   const now = new Date().toISOString();
+
+  // ═══════════════════════════════════════════════════════
+  //  规则模块：注入在**历史之后、最后一条用户消息之前**
+  //
+  //  位置是这个改动的一半价值。旧的写作规则（POST_HISTORY_BASE /
+  //  ANTI_AI_PATTERN / WORLD_RULES）全在 stableSystem 里，也就是
+  //  messages[0]；而它后面还有 dynamicSystem（3 万字）+ 最多 16 条历史。
+  //  实测症状完全吻合规则衰减：前 4 轮还好，第 5 轮之后人称漂移、
+  //  格式漂移、长度失控。
+  //
+  //  这里把最硬的几条规则安排在**最贴近生成点**的位置，每轮重复一次。
+  //  各模块可独立开关（见 prompts/modules/index.ts），供观测台做 A/B。
+  // ═══════════════════════════════════════════════════════
+  const fanficCfg = (session as any).fanficConfig;
+  const ruleBlock = buildRuleModules({
+    playerName: session.selectedCharacters[0]?.name || '玩家',
+    isSoul: fanficCfg?.type === 'soul',
+    pov: 'second',
+  });
+  const tailNote = buildTailNote();
+  const prefillText = getPrefillText();
+
   const prompt: ChatMessage[] = [
     { role: 'system', content: stableSystem, timestamp: now },
     { role: 'system', content: dynamicSystem, timestamp: now },
-    ...historyMsgs.map((m): ChatMessage => ({ role: m.role as 'user' | 'assistant', content: m.content, timestamp: m.timestamp || now })),
+    // 规则块之前的历史
+    ...historyMsgs.slice(0, -1).map((m): ChatMessage => ({ role: m.role as 'user' | 'assistant', content: m.content, timestamp: m.timestamp || now })),
+    // 规则块 —— 紧贴生成点
+    ...(ruleBlock ? [{ role: 'system' as const, content: ruleBlock, timestamp: now }] : []),
+    // 本轮的玩家输入
+    ...historyMsgs.slice(-1).map((m): ChatMessage => ({ role: m.role as 'user' | 'assistant', content: m.content, timestamp: m.timestamp || now })),
+    // 尾注 —— 规则块很长（11 个模块），塞在里面的要求会被稀释，
+    // 这里把最容易漏掉的两条再强调一次，位置紧贴玩家输入
+    ...(tailNote ? [{ role: 'system' as const, content: tailNote, timestamp: now }] : []),
+    // assistant 预填充 —— 替模型起头。
+    // reasoning 开时内容是 <思考>（强制先想）；否则是 【旁白】（锁死正文格式）。
+    // 注意：API 只返回续写部分，stage6 必须把这段前缀补回去。
+    ...(prefillText ? [{ role: 'assistant' as const, content: prefillText, timestamp: now }] : []),
   ];
 
   return { prompt, chapterPrompt, scenarioBlock };

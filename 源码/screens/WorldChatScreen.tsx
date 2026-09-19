@@ -78,6 +78,22 @@ function parseSpeakers(text: string): { speaker: string; content: string }[] {
   return segments;
 }
 
+/**
+ * 把 AI 给出的行动选项解析成数组。
+ * 模型输出的是 "1. xxx" 这样的编号列表，容忍 1、/1) /1． 等变体，
+ * 也容忍模型忘了写编号的情况（整行当一条）。
+ */
+function parseOptions(options?: string): string[] {
+  if (!options) return [];
+  return options
+    .split('\n')
+    .map(l => l.trim())
+    .filter(Boolean)
+    .map(l => l.replace(/^\d+\s*[.、)）．]\s*/, '').trim())
+    .filter(l => l.length > 1)
+    .slice(0, 6);
+}
+
 
 export default function WorldChatScreen({ session: initialSession, onBack, isDark }: Props) {
   const st = T(isDark);
@@ -215,8 +231,13 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
     }
   }, []);
 
-  const send = useCallback(async () => {
-    if (segments.length === 0 || isGenerating) return;
+  /**
+   * 发送。带一个可选参数：点行动选项时直接把那一条当输入发出去，
+   * 不走 segments 状态（setState 是异步的，直接调 send 会读到旧值）。
+   */
+  const send = useCallback(async (segmentsOverride?: { text: string; tag: string }[]) => {
+    const segs = (segmentsOverride && segmentsOverride.length > 0) ? segmentsOverride : segments;
+    if (segs.length === 0 || isGenerating) return;
     const cfg = useConfigStore.getState().getActiveConfig();
     if (!cfg?.apiKey) { setError('请先配置API Key'); return; }
 
@@ -229,7 +250,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
 
     // 阶段 1: 输入处理
     setError(null); setIsGenerating(true); setStreamingText('');
-    const { finalText, userMsg, msgsWithUser } = processInput(segments, messages);
+    const { finalText, userMsg, msgsWithUser } = processInput(segs, messages);
     setSegments([]);
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     store.setMessages(msgsWithUser);
@@ -259,7 +280,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
 
       if (raw) {
         // 阶段 7: 响应后处理
-        const { displayText, newNpcs, scene, polished } = postProcessResponse(raw, session, cfg, chapterCtx);
+        const { displayText, newNpcs, scene, polished, options } = postProcessResponse(raw, session, cfg, chapterCtx);
         if (newNpcs) {
           for (const npc of newNpcs) {
             const cur = getWorldState().session;
@@ -281,7 +302,15 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
           console.log('[SCENE] router -> ' + routerDecision.sceneHint);
         }
 
-        const msg: ChatMessage = { role: 'assistant', content: displayText || raw, timestamp: new Date().toISOString() };
+        // 行动选项：解析成数组挂在消息上，UI 只给**最新一条**渲染成可点击按钮。
+        // 挂在这一条上而不是全局状态里，是为了让历史轮次的选项随消息一起走——
+        // 发送后它不再是最后一条，按钮自然"收回"。
+        const msg: ChatMessage = {
+          role: 'assistant',
+          content: displayText || raw,
+          timestamp: new Date().toISOString(),
+          choices: parseOptions(options),
+        };
         const updated = [...msgsWithUser, msg];
         LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
         useWorldSessionStore.getState().setMessages(updated);
@@ -354,6 +383,16 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
     }
   }, [isGenerating, session, messages, segments, saveSession]);
 
+  /**
+   * 点击行动选项：把该选项原文当作一次"行动"直接发出去。
+   * 不走 segments 状态（setState 异步，紧接着调 send 会读到旧值），
+   * 而是把 segments 作为参数传给 send。
+   */
+  const sendOption = useCallback((text: string) => {
+    if (isGenerating) return;
+    void send([{ text, tag: 'action' }]);
+  }, [isGenerating, send]);
+
   const renderMsg = ({ item }: { item: ChatMessage }) => {
     if (item.role === 'user') {
       const lines = item.content.split('\n');
@@ -378,9 +417,38 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
         })}</View>
       : <View style={st.msgBubble}>{highlightQuotes(item.content, isDark)}</View>;
     if (isLastAssistant) {
+      // 选项只在**最新一条**助手消息上渲染成可点击按钮。
+      // 玩家一发出去，这条就不再是最后一条（且 isGenerating 为真），
+      // 按钮自然收回；下一轮的选项挂在新消息上。
+      const opts = item.choices || [];
       return (
-        <TouchableOpacity activeOpacity={0.9} onLongPress={handleRegenerate}>
-          {inner}
+        <View>
+          <TouchableOpacity activeOpacity={0.9} onLongPress={handleRegenerate}>
+            {inner}
+          </TouchableOpacity>
+          {opts.length > 0 && (
+            <View style={{ paddingHorizontal: 14, marginTop: 2, marginBottom: 6, gap: 6 }}>
+              {opts.map((opt, i) => (
+                <TouchableOpacity
+                  key={i}
+                  onPress={() => sendOption(opt)}
+                  disabled={isGenerating}
+                  style={{
+                    borderWidth: 1,
+                    borderColor: isDark ? '#3A4A5A' : '#C8D8E8',
+                    backgroundColor: isDark ? '#141C26' : '#F0F6FC',
+                    borderRadius: 8,
+                    paddingHorizontal: 10,
+                    paddingVertical: 7,
+                  }}
+                >
+                  <Text style={{ fontSize: 13, lineHeight: 19, color: isDark ? '#C8D8E8' : '#2D4A66' }}>
+                    {opt}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
           <View style={{ flexDirection: 'row', paddingLeft: 16, marginTop: -2, marginBottom: 8, gap: 8 }}>
             <TouchableOpacity onPress={() => { recordFeedback(1, item, messages[messages.length - 2], session); setToast({msg:'已反馈',type:'success'}); }}>
               <Text style={{ fontSize: 13, opacity: 0.5 }}>👍</Text>
@@ -390,7 +458,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
             </TouchableOpacity>
             <Text style={{ fontSize: 9, color: isDark ? '#5A5450' : '#B8B0A4', alignSelf: 'center' }}>长按重生成</Text>
           </View>
-        </TouchableOpacity>
+        </View>
       );
     }
     return inner;
@@ -468,7 +536,7 @@ export default function WorldChatScreen({ session: initialSession, onBack, isDar
         <TouchableOpacity onPress={() => commitSegment('speech')} style={{ paddingHorizontal: 6, paddingVertical: 12, marginRight: 2 }}><Text style={{ fontSize: 12, color: '#5B9BD5', fontWeight: '700' }}>说</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => commitSegment('action')} style={{ paddingHorizontal: 6, paddingVertical: 12, marginRight: 4 }}><Text style={{ fontSize: 12, color: '#8A8070', fontWeight: '700' }}>行动</Text></TouchableOpacity>
         <TextInput style={st.textInput} value={inputText} onChangeText={setInputText} placeholder="输入消息..." placeholderTextColor={isDark ? '#555' : '#bbb'} multiline maxLength={2000} editable={!isGenerating} returnKeyType="send" />
-        <TouchableOpacity style={[st.sendBtn, (!!inputText.trim() || isGenerating) && st.sendBtnOff]} onPress={send} disabled={!!inputText.trim() || segments.length === 0 || isGenerating}>
+        <TouchableOpacity style={[st.sendBtn, (!!inputText.trim() || isGenerating) && st.sendBtnOff]} onPress={() => send()} disabled={!!inputText.trim() || segments.length === 0 || isGenerating}>
           {isGenerating ? <ActivityIndicator size="small" color="#fff" /> : <Text style={st.sendText}>发送</Text>}
         </TouchableOpacity>
       </View>

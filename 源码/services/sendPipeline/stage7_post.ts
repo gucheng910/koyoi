@@ -14,12 +14,21 @@
 
 import { polishText } from '../../api/deepseek';
 import { withTag } from '../trace';
+import { OPTIONS_MARKER } from '../../prompts/modules/options';
+import { PROSE_MARKER } from '../../prompts/modules/reasoning';
 import type { WorldSession } from '../../types';
 import type { ApiConfig } from '../../types';
 
 export interface PostProcessResult {
   /** 立即可渲染的正文（已剥离 ___META___，但尚未抛光） */
   displayText: string;
+  /**
+   * 模型在 <思考> 里写的过程（若启用了 reasoning 模块）。
+   * 不渲染给玩家，但保留下来供观测台审查——思考质量直接决定正文质量。
+   */
+  thinking?: string;
+  /** 行动选项（单侧标记之后的全部内容）。仍留在 displayText 里给玩家看，这里单独存一份供审查。 */
+  options?: string;
   newNpcs?: Array<{ name: string; role: string; personality: string; currentStatus: string; goal: string }>;
   /** 场景转变（AI 通过 ___META___ {"scene":"..."} 上报） */
   scene?: string;
@@ -187,13 +196,55 @@ export function postProcessResponse(
   // 再尝试解析其中的 JSON。JSON 坏掉时只丢弃标记，绝不让 ___META___
   // 出现在用户看到的正文里。
   let body = raw;
-  const metaIdx = raw.search(/___META___/);
+
+  // ── 先摘出 <思考> 块 ──
+  // reasoning 模块要求模型先想再写。思考过程绝不能渲染给玩家，
+  // 但也不能直接丢掉——它决定了正文质量，观测台要看。
+  // 放在最前面处理：思考里的内容可能包含 ___META___ 字样，先摘掉免得被后面误判。
+  let thinking: string | undefined;
+  const thinkOpen = body.indexOf('<思考>');
+  if (thinkOpen >= 0) {
+    const rest = body.slice(thinkOpen + '<思考>'.length);
+    const proseMark = rest.indexOf(PROSE_MARKER);
+    const closeTag = rest.indexOf('</思考>');
+    // 优先认单侧分隔符（实测出现率远高于闭合标签），其次兼容旧的 </思考>
+    let cut = -1;
+    let cutLen = 0;
+    if (proseMark >= 0 && (closeTag < 0 || proseMark < closeTag)) {
+      cut = proseMark; cutLen = PROSE_MARKER.length;
+    } else if (closeTag >= 0) {
+      cut = closeTag; cutLen = '</思考>'.length;
+    }
+    if (cut >= 0) {
+      thinking = rest.slice(0, cut).trim().slice(0, 4000);
+      body = rest.slice(cut + cutLen).trim();
+    } else {
+      // 两个标记都没有 → 丢弃到第一个正文块标记【为止，别把半截思考当正文
+      thinking = rest.trim().slice(0, 4000);
+      const i = rest.indexOf('【');
+      body = i >= 0 ? rest.slice(i).trim() : '';
+    }
+  }
+
+  // 行动选项：单侧标记，标记之后到文末都是选项。
+  // 从 displayText 里**摘掉** —— UI 会把它们单独渲染成可点击的按钮，
+  // 留在正文里会重复显示。原始文本另存一份供观测台审查。
+  let options: string | undefined;
+  const optIdx = body.indexOf(OPTIONS_MARKER);
+  if (optIdx >= 0) {
+    options = body.slice(optIdx + OPTIONS_MARKER.length).trim();
+    body = body.slice(0, optIdx).trim();
+  }
+
+  const metaIdx = body.search(/___META___/);
   const newNpcs: NonNullable<PostProcessResult['newNpcs']> = [];
   let scene: string | undefined;
 
   if (metaIdx >= 0) {
-    body = raw.slice(0, metaIdx).trim();
-    const jsonPart = raw.slice(metaIdx).replace(/^___META___\s*/, '');
+    // 注意：索引基于 body（已剥掉 <思考>），不能再拿 raw 去切。
+    // 且必须先取出 jsonPart 再截断 body —— 反过来会把 JSON 一起截掉。
+    const jsonPart = body.slice(metaIdx).replace(/^___META___\s*/, '');
+    body = body.slice(0, metaIdx).trim();
     const objMatch = jsonPart.match(/\{[\s\S]*\}/);
     if (objMatch) {
       try {
@@ -260,6 +311,8 @@ export function postProcessResponse(
 
   return {
     displayText: body,
+    thinking,
+    options,
     newNpcs: newNpcs.length > 0 ? newNpcs : undefined,
     scene,
     polished,

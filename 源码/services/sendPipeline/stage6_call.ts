@@ -11,8 +11,17 @@ export async function callAI(
   prompt: ChatMessage[],
   setStreamingText: (text: string) => void
 ): Promise<string> {
-  // 注意：轮次的起点/终点由调用方（WorldChatScreen.send）划定，
-  // 不在本阶段处理——否则 stage4 的并发调用会被算进上一轮。
+  // 预填充检测：stage5 可能在最末尾追加了一条 assistant 消息作为"起头"。
+  // OpenAI 兼容端点只返回**续写部分**，不含这条前缀 —— 必须补回去，
+  // 否则正文会丢掉开头的【旁白】标记，格式反而更乱。
+  const tail = prompt[prompt.length - 1];
+  const prefill = tail && tail.role === 'assistant' ? tail.content : '';
+
+  // 模型有时会**把前缀自己又写一遍**（实测 3 轮里 1 轮不写、2 轮重复写）。
+  // 无条件补前缀会得到「【旁白】【旁白】…」。所以只在它没写时才补。
+  const withPrefix = (t: string): string =>
+    !prefill || t.startsWith(prefill) ? t : prefill + t;
+
   return new Promise<string>((resolve, reject) => {
     if (cfg.streamOutput) {
       let full = '';
@@ -24,14 +33,14 @@ export async function callAI(
         onToken: (token) => {
           full += token;
           const now = Date.now();
-          if (now - lastUpdate > 50) { setStreamingText(full); lastUpdate = now; }
+          if (now - lastUpdate > 50) { setStreamingText(withPrefix(full)); lastUpdate = now; }
         },
-        onComplete: (text) => { setStreamingText(''); resolve(text || full); },
+        onComplete: (text) => { setStreamingText(''); resolve(withPrefix(text || full)); },
         onError: reject,
       })).catch(reject);
     } else {
       withTag('narrator', () => chatCompletionSync({ ...cfg, thinkingMode: 'disabled' }, prompt, { temperature: 0.8 }))
-        .then(resolve)
+        .then(t => resolve(withPrefix(t)))
         .catch(reject);
     }
   });
